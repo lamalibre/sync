@@ -1,0 +1,88 @@
+{
+  "name": "sync",
+  "displayName": "Sync",
+  "description": "File synchronization and cloud archive",
+  "version": "0.1.0",
+  "repository": "https://github.com/lamalibre/sync",
+
+  "roles": {
+    "host": {
+      "package": "@lamalibre/sync-server",
+      "binary": "sync-server",
+      "singleton": true,
+      "description": "Sync server — project state, scheduling, storage config"
+    },
+    "agent": {
+      "package": "@lamalibre/sync-agent",
+      "binary": "sync-agent",
+      "singleton": false,
+      "description": "Sync agent — rclone operations, file watching, archive/restore"
+    }
+  },
+
+  "standalone": {
+    "host": {
+      "port": 9393,
+      "configDir": "~/.sync/"
+    },
+    "agent": {
+      "configDir": "~/.sync-agent/"
+    }
+  },
+
+  "panel": {
+    "pages": [
+      {
+        "path": "/sync",
+        "title": "Projects",
+        "icon": "folder-sync",
+        "description": "Sync projects, status, and history"
+      },
+      {
+        "path": "/sync/settings",
+        "title": "Storage",
+        "icon": "hard-drive",
+        "description": "Storage provider configuration"
+      }
+    ],
+    "apiPrefix": "/api/sync"
+  },
+
+  "desktop": {
+    "tabs": [
+      {
+        "id": "sync-projects",
+        "title": "Sync",
+        "icon": "folder-sync",
+        "description": "File sync projects and status"
+      },
+      {
+        "id": "sync-storage",
+        "title": "Storage",
+        "icon": "hard-drive",
+        "description": "Storage provider settings"
+      }
+    ],
+    "commands": [
+      {
+        "id": "sync-trigger",
+        "title": "Sync Now",
+        "description": "Trigger sync for a project"
+      },
+      {
+        "id": "sync-archive",
+        "title": "Archive",
+        "description": "Archive project files to cloud"
+      },
+      {
+        "id": "sync-restore",
+        "title": "Restore",
+        "description": "Restore archived files from cloud"
+      }
+    ]
+  },
+
+  "capabilities": {
+    "agent": ["sync:read", "sync:write", "storage:read", "storage:write"]
+  }
+}

@@ -1,0 +1,98 @@
+#!/usr/bin/env bash
+# ============================================================================
+# Test 10 — Encryption
+# ============================================================================
+# Tests encrypted sync via rclone crypt overlay. Verifies that files stored
+# in the remote bucket are encrypted and that they can be decrypted on pull.
+# ============================================================================
+
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+source "${SCRIPT_DIR}/helpers.sh"
+
+require_commands curl jq multipass
+
+begin_test "Encryption"
+
+# ---------------------------------------------------------------------------
+log_section "Create an encrypted project"
+# ---------------------------------------------------------------------------
+
+ENCRYPT_CONFIG='{
+  "name": "e2e-encrypted-project",
+  "localPath": "/tmp/sync-e2e-project-encrypted",
+  "remotePath": "test-remote:/tmp/sync-e2e-bucket/e2e-encrypted",
+  "syncDirection": "push",
+  "encryption": {
+    "enabled": true,
+    "password": "e2e-test-password-123"
+  }
+}'
+
+RESPONSE=$(api_post "projects" "$ENCRYPT_CONFIG")
+assert_json_field "$RESPONSE" '.ok' "true" "Encrypted project created"
+
+ENCRYPTED_PROJECT_ID=$(echo "$RESPONSE" | jq -r '.project.id')
+log_info "Encrypted project ID: $ENCRYPTED_PROJECT_ID"
+
+# ---------------------------------------------------------------------------
+log_section "Create test files on agent"
+# ---------------------------------------------------------------------------
+
+agent_exec "mkdir -p /tmp/sync-e2e-project-encrypted"
+agent_exec "echo 'Secret data' > /tmp/sync-e2e-project-encrypted/secret.txt"
+agent_exec "echo 'Confidential report' > /tmp/sync-e2e-project-encrypted/report.txt"
+
+assert_file_on_agent "/tmp/sync-e2e-project-encrypted/secret.txt" "Secret file created"
+
+# ---------------------------------------------------------------------------
+log_section "Trigger encrypted push sync"
+# ---------------------------------------------------------------------------
+
+SYNC_RESPONSE=$(api_post "projects/${ENCRYPTED_PROJECT_ID}/sync" '{"direction": "push"}')
+assert_json_field "$SYNC_RESPONSE" '.ok' "true" "Encrypted push triggered"
+
+wait_for_sync_complete "$ENCRYPTED_PROJECT_ID" 60
+RESULT=$?
+assert_eq "$RESULT" "0" "Encrypted push completed"
+
+# ---------------------------------------------------------------------------
+log_section "Verify remote files are encrypted (not readable as plaintext)"
+# ---------------------------------------------------------------------------
+
+# The encrypted bucket should contain files but NOT readable as plaintext
+REMOTE_FILES=$(agent_exec "ls /tmp/sync-e2e-bucket/e2e-encrypted/ 2>/dev/null || echo ''")
+assert_not_eq "$REMOTE_FILES" "" "Encrypted remote has files"
+
+# The filenames should be encrypted (not matching original names)
+# or if filenames aren't encrypted, the content should be
+REMOTE_CONTENT=$(agent_exec "cat /tmp/sync-e2e-bucket/e2e-encrypted/secret.txt 2>/dev/null || echo 'encrypted'")
+assert_not_eq "$REMOTE_CONTENT" "Secret data" "Remote file content is not plaintext"
+
+# ---------------------------------------------------------------------------
+log_section "Delete local files and pull (decrypt)"
+# ---------------------------------------------------------------------------
+
+agent_exec "rm -f /tmp/sync-e2e-project-encrypted/secret.txt /tmp/sync-e2e-project-encrypted/report.txt"
+
+PULL_RESPONSE=$(api_post "projects/${ENCRYPTED_PROJECT_ID}/sync" '{"direction": "pull"}')
+assert_json_field "$PULL_RESPONSE" '.ok' "true" "Encrypted pull triggered"
+
+wait_for_sync_complete "$ENCRYPTED_PROJECT_ID" 60
+RESULT=$?
+assert_eq "$RESULT" "0" "Encrypted pull completed"
+
+# ---------------------------------------------------------------------------
+log_section "Verify decrypted content matches original"
+# ---------------------------------------------------------------------------
+
+DECRYPTED=$(agent_exec "cat /tmp/sync-e2e-project-encrypted/secret.txt 2>/dev/null || echo ''")
+assert_eq "$DECRYPTED" "Secret data" "Decrypted file matches original"
+
+# ---------------------------------------------------------------------------
+log_section "Cleanup encrypted project"
+# ---------------------------------------------------------------------------
+
+api_delete "projects/${ENCRYPTED_PROJECT_ID}" > /dev/null
+log_info "Encrypted project cleaned up"
+
+end_test

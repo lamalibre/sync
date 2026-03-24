@@ -1,0 +1,51 @@
+{
+  "name": "@lamalibre/create-sync",
+  "version": "0.1.0",
+  "description": "Create Sync — npx installer for setting up sync-server and sync-agent",
+  "type": "module",
+  "license": "PolyForm-Noncommercial-1.0.0",
+  "author": "Code Lama Software",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/lamalibre/sync.git",
+    "directory": "packages/create-sync"
+  },
+  "homepage": "https://github.com/lamalibre/sync",
+  "bugs": {
+    "url": "https://github.com/lamalibre/sync/issues"
+  },
+  "keywords": [
+    "sync",
+    "create",
+    "installer",
+    "rclone",
+    "setup"
+  ],
+  "main": "dist/index.js",
+  "module": "dist/index.js",
+  "bin": {
+    "create-sync": "bin/create-sync.mjs"
+  },
+  "publishConfig": {
+    "access": "public"
+  },
+  "files": [
+    "dist",
+    "bin"
+  ],
+  "scripts": {
+    "build": "node ../../scripts/build.mjs",
+    "lint": "tsc --noEmit"
+  },
+  "dependencies": {
+    "@clack/prompts": "^0.9.0",
+    "@lamalibre/sync-shared": "workspace:*",
+    "picocolors": "^1.1.0",
+    "execa": "^9.5.0"
+  },
+  "devDependencies": {
+    "typescript": "^5.7.0",
+    "esbuild": "^0.24.0",
+    "@types/node": "^22.0.0"
+  }
+}

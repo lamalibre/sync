@@ -1,0 +1,154 @@
+{
+  "sections": [
+    {
+      "title": "Introduction",
+      "pages": [
+        {
+          "title": "What is Sync?",
+          "slug": "what-is-sync",
+          "file": "00-introduction/what-is-sync.md"
+        },
+        {
+          "title": "How It Works",
+          "slug": "how-it-works",
+          "file": "00-introduction/how-it-works.md"
+        },
+        {
+          "title": "Quick Start",
+          "slug": "quickstart",
+          "file": "00-introduction/quickstart.md"
+        }
+      ]
+    },
+    {
+      "title": "Concepts",
+      "pages": [
+        {
+          "title": "Deployment Modes",
+          "slug": "deployment-modes",
+          "file": "01-concepts/deployment-modes.md"
+        },
+        {
+          "title": "Sync Engine",
+          "slug": "sync-engine",
+          "file": "01-concepts/sync-engine.md"
+        },
+        {
+          "title": "Archive & Restore",
+          "slug": "archive-restore",
+          "file": "01-concepts/archive-restore.md"
+        },
+        {
+          "title": "Storage Providers",
+          "slug": "storage-providers",
+          "file": "01-concepts/storage-providers.md"
+        },
+        {
+          "title": "Encryption",
+          "slug": "encryption",
+          "file": "01-concepts/encryption.md"
+        },
+        {
+          "title": "Security Model",
+          "slug": "security-model",
+          "file": "01-concepts/security-model.md"
+        }
+      ]
+    },
+    {
+      "title": "Guides",
+      "pages": [
+        {
+          "title": "Standalone Setup",
+          "slug": "standalone-setup",
+          "file": "02-guides/standalone-setup.md"
+        },
+        {
+          "title": "Agent Enrollment",
+          "slug": "agent-enrollment",
+          "file": "02-guides/agent-enrollment.md"
+        },
+        {
+          "title": "Configuring Storage",
+          "slug": "configuring-storage",
+          "file": "02-guides/configuring-storage.md"
+        },
+        {
+          "title": "Managing Projects",
+          "slug": "managing-projects",
+          "file": "02-guides/managing-projects.md"
+        },
+        {
+          "title": "Archiving Files",
+          "slug": "archiving-files",
+          "file": "02-guides/archiving-files.md"
+        },
+        {
+          "title": "CLI Usage",
+          "slug": "cli-usage",
+          "file": "02-guides/cli-usage.md"
+        }
+      ]
+    },
+    {
+      "title": "Architecture",
+      "pages": [
+        {
+          "title": "System Overview",
+          "slug": "architecture-overview",
+          "file": "03-architecture/overview.md"
+        },
+        {
+          "title": "Sync Server",
+          "slug": "sync-server",
+          "file": "03-architecture/sync-server.md"
+        },
+        {
+          "title": "Sync Agent",
+          "slug": "sync-agent",
+          "file": "03-architecture/sync-agent.md"
+        },
+        {
+          "title": "State Management",
+          "slug": "state-management",
+          "file": "03-architecture/state-management.md"
+        }
+      ]
+    },
+    {
+      "title": "API Reference",
+      "pages": [
+        {
+          "title": "API Overview",
+          "slug": "api-overview",
+          "file": "04-api-reference/overview.md"
+        },
+        {
+          "title": "Projects API",
+          "slug": "api-projects",
+          "file": "04-api-reference/projects.md"
+        },
+        {
+          "title": "Storage & Archive API",
+          "slug": "api-storage-archive",
+          "file": "04-api-reference/storage-archive.md"
+        }
+      ]
+    },
+    {
+      "title": "Reference",
+      "pages": [
+        {
+          "title": "Config Files",
+          "slug": "config-files",
+          "file": "05-reference/config-files.md"
+        },
+        {
+          "title": "Glossary",
+          "slug": "glossary",
+          "file": "05-reference/glossary.md"
+        }
+      ]
+    }
+  ]
+}

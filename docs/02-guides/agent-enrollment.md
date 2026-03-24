@@ -1,0 +1,147 @@
+# Agent Enrollment
+
+> Enroll an agent on a remote machine to sync files with the Sync server — in standalone mode with an API key, or in plugin mode with a Portlama config bundle.
+
+## In Plain English
+
+The Sync Agent is the worker that runs on the machine with the files. It needs to know two things: where is the server, and how do I authenticate? Enrollment gives the agent this information and starts it as a system service.
+
+In standalone mode, the agent receives a server URL and API key. In plugin mode, the agent receives an encrypted config bundle from Portlama that contains the server URL, credentials, and project definitions.
+
+## Prerequisites
+
+**On the agent machine:**
+- Node.js 22+
+- rclone installed (`brew install rclone` on macOS, `apt install rclone` on Linux)
+- Network access to the Sync server
+
+**From the server:**
+- Server URL (e.g., `http://192.168.1.100:9393`)
+- API key (generated during server setup)
+
+## Standalone Enrollment
+
+### Step 1: Run the Installer
+
+On the remote machine:
+
+```bash
+npx @lamalibre/create-sync --agent --server http://<server-ip>:9393 --api-key <api-key>
+```
+
+Or run interactively (prompts for server URL and API key):
+
+```bash
+npx @lamalibre/create-sync --agent
+```
+
+### Step 2: Verify Connection
+
+The installer tests connectivity with the server:
+
+```
+✔ Checking rclone installation
+✔ Testing server connection (http://192.168.1.100:9393)
+✔ Verifying API key
+✔ Creating agent directory (~/.sync-agent/)
+✔ Registering agent with server
+✔ Installing system service
+```
+
+### Step 3: Check Agent Status
+
+```bash
+# macOS
+launchctl list | grep sync-agent
+
+# Linux
+systemctl --user status sync-agent
+```
+
+The agent starts polling the server immediately. Check the server's agent list:
+
+```bash
+curl http://<server-ip>:9393/api/sync/agents \
+  -H "Authorization: Bearer <api-key>"
+```
+
+### What Gets Created
+
+```
+~/.sync-agent/
+├── agent-settings.json     # Server URL, API key, agent ID (mode 0600)
+├── cached-config.json      # Encrypted config cache (mode 0600)
+├── rclone.conf             # Generated rclone config (mode 0600)
+├── master.key              # Local encryption key (mode 0600)
+└── sync-state.json         # Per-project sync state
+```
+
+## Plugin Enrollment (Portlama)
+
+In plugin mode, the agent receives a config bundle from Portlama:
+
+### Step 1: Get the Config Bundle
+
+In the Portlama panel, navigate to Sync settings and generate a config bundle. You will receive:
+- An encrypted bundle (base64 string)
+- A one-time passphrase
+
+### Step 2: Run the Installer
+
+```bash
+npx @lamalibre/create-sync --bundle
+```
+
+The installer prompts for:
+1. The config bundle string
+2. The passphrase to decrypt it
+
+### Step 3: Verify
+
+The installer decrypts the bundle, extracts the server URL and credentials, tests connectivity, and installs the agent service.
+
+## Multi-Agent Setup
+
+Sync supports multiple agents syncing different machines. Each agent:
+- Registers with the server (receives a unique agent ID)
+- Can be assigned specific projects
+- Sends independent heartbeats (every 15 seconds)
+- Reports its own disk usage
+
+### Assigning Projects to Agents
+
+By default, all agents receive all projects. To assign specific projects:
+
+```bash
+curl -X PATCH http://localhost:9393/api/sync/agents/<agent-id>/projects \
+  -H "Authorization: Bearer <api-key>" \
+  -H "Content-Type: application/json" \
+  -d '{ "projectIds": ["project-a", "project-b"] }'
+```
+
+## Troubleshooting
+
+### Agent Cannot Reach Server
+
+- Verify the server URL is correct and the port is open
+- Check firewall rules between agent and server machines
+- Test connectivity: `curl http://<server-ip>:9393/api/sync/health`
+
+### Agent Shows as Offline
+
+The server marks an agent as offline if no heartbeat is received within 30 seconds. Check:
+- Agent service is running: `launchctl list | grep sync-agent` (macOS)
+- Agent logs: `tail -f ~/.sync-agent/sync-agent.log`
+
+### rclone Not Found
+
+The agent requires rclone to be installed on the agent machine:
+- macOS: `brew install rclone`
+- Linux: `apt install rclone` or `curl https://rclone.org/install.sh | sudo bash`
+
+## Related Documentation
+
+- [Standalone Setup](standalone-setup.md) — server installation
+- [Configuring Storage](configuring-storage.md) — storage provider setup
+- [Managing Projects](managing-projects.md) — creating sync projects
+- [Deployment Modes](../01-concepts/deployment-modes.md) — standalone vs plugin

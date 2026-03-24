@@ -1,0 +1,57 @@
+# Dependencies
+node_modules/
+
+# Build output
+dist/
+*.tsbuildinfo
+
+# Environment
+.env
+.env.*
+
+# OS files
+.DS_Store
+Thumbs.db
+
+# Editor
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# Claude Code
+.claude/
+
+# Logs
+*.log
+
+# Lock files (keep pnpm-lock.yaml)
+package-lock.json
+yarn.lock
+
+# Tauri
+**/src-tauri/target/
+**/src-tauri/gen/
+
+# Rust
+Cargo.lock
+
+# rclone config (contains credentials)
+rclone.conf
+rclone-test-*.conf
+
+# VitePress (generated)
+website/src/
+website/.vitepress/dist/
+website/.vitepress/sidebar.json
+website/.vitepress/cache/
+
+# Sync state (local data)
+sync-config.json
+projects.json
+sync-history.json
+agents.json
+archive-savings.json
+agent-settings.json
+cached-config.json
+bisync-state.json

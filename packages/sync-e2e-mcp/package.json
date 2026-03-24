@@ -1,0 +1,50 @@
+{
+  "name": "@lamalibre/sync-e2e-mcp",
+  "version": "0.1.0",
+  "description": "MCP server for Sync E2E test infrastructure — server lifecycle, test execution, dependency resolution",
+  "type": "module",
+  "private": false,
+  "license": "PolyForm-Noncommercial-1.0.0",
+  "author": "Code Lama Software",
+  "main": "src/index.js",
+  "bin": {
+    "sync-e2e-mcp": "bin/sync-e2e-mcp.js"
+  },
+  "publishConfig": {
+    "access": "public"
+  },
+  "files": [
+    "bin",
+    "src"
+  ],
+  "scripts": {
+    "start": "node src/index.js",
+    "build": "echo 'No build step for e2e-mcp'"
+  },
+  "dependencies": {
+    "@modelcontextprotocol/sdk": "^1.27.1",
+    "chalk": "^5.3.0",
+    "execa": "^9.6.1",
+    "listr2": "^8.0.0",
+    "zod": "^3.23.0"
+  },
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/lamalibre/sync.git",
+    "directory": "packages/sync-e2e-mcp"
+  },
+  "homepage": "https://github.com/lamalibre/sync#readme",
+  "bugs": {
+    "url": "https://github.com/lamalibre/sync/issues"
+  },
+  "keywords": [
+    "sync",
+    "e2e",
+    "mcp",
+    "testing",
+    "model-context-protocol"
+  ],
+  "engines": {
+    "node": ">=20.0.0"
+  }
+}

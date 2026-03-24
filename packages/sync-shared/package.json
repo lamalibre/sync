@@ -1,0 +1,41 @@
+{
+  "name": "@lamalibre/sync-shared",
+  "version": "0.1.0",
+  "description": "Shared utilities for Sync — types, atomic writes, rclone config generation, path validation",
+  "type": "module",
+  "license": "PolyForm-Noncommercial-1.0.0",
+  "author": "Code Lama Software",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/lamalibre/sync.git",
+    "directory": "packages/sync-shared"
+  },
+  "homepage": "https://github.com/lamalibre/sync",
+  "bugs": {
+    "url": "https://github.com/lamalibre/sync/issues"
+  },
+  "keywords": [
+    "sync",
+    "shared",
+    "utilities",
+    "rclone"
+  ],
+  "main": "dist/index.js",
+  "module": "dist/index.js",
+  "types": "src/index.ts",
+  "publishConfig": {
+    "access": "public"
+  },
+  "files": [
+    "dist"
+  ],
+  "scripts": {
+    "build": "node ../../scripts/build.mjs",
+    "lint": "tsc --noEmit"
+  },
+  "devDependencies": {
+    "@types/node": "^22.0.0",
+    "esbuild": "^0.24.0",
+    "typescript": "^5.7.0"
+  }
+}
