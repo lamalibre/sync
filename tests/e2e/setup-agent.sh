@@ -17,6 +17,13 @@
 
 set -euo pipefail
 
+# Guard: this script must run inside a Linux VM, not on macOS
+if [[ "$(uname -s)" != "Linux" ]]; then
+  echo "ERROR: setup-agent.sh must run inside a Linux VM, not on $(uname -s)."
+  echo "It is invoked automatically by the MCP provision_agent tool."
+  exit 1
+fi
+
 HOST_IP="${1:?Usage: setup-agent.sh <host_ip> [port] [api_key]}"
 PORT="${2:-9393}"
 API_KEY="${3:-e2e-test-key}"
@@ -121,7 +128,6 @@ Type=simple
 User=root
 WorkingDirectory=${SYNC_DIR}
 ExecStart=/usr/bin/node ${SYNC_DIR}/packages/sync-agent/bin/sync-agent.mjs
-Environment=NODE_ENV=development
 Environment=SYNC_AGENT_HOME=${AGENT_HOME}
 Restart=on-failure
 RestartSec=3

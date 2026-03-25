@@ -53,6 +53,22 @@ export const PROJECT_STATUSES = [
 export type ProjectStatus = (typeof PROJECT_STATUSES)[number];
 
 // ---------------------------------------------------------------------------
+// Soft delete configuration
+// ---------------------------------------------------------------------------
+
+export interface SoftDeleteConfig {
+  readonly enabled: boolean;
+  readonly retentionDays: number;
+  readonly cleanupSchedule: string; // cron expression
+}
+
+export const DEFAULT_SOFT_DELETE_CONFIG: SoftDeleteConfig = {
+  enabled: true,
+  retentionDays: 90,
+  cleanupSchedule: '0 3 * * *', // daily at 3 AM
+};
+
+// ---------------------------------------------------------------------------
 // Utility type guard
 // ---------------------------------------------------------------------------
 

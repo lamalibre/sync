@@ -78,7 +78,7 @@ async function readJson<T>(filePath: string, fallback: T): Promise<T> {
 async function writeJsonAtomic<T>(filePath: string, data: T): Promise<void> {
   await ensureDataDir();
   const dir = dirname(filePath);
-  await mkdir(dir, { recursive: true });
+  await mkdir(dir, { recursive: true, mode: 0o700 });
   const json = JSON.stringify(data, null, 2);
   await atomicWriteFile(filePath, json, 0o600);
 }
@@ -235,10 +235,12 @@ export async function createProject(input: ProjectCreate): Promise<Project> {
     watch: input.watch,
     trigger: input.trigger,
     watchDebounceMs: input.watchDebounceMs,
+    ...(input.softDelete ? { softDelete: input.softDelete } : {}),
     status: 'local-only',
     lastSync: null,
     createdAt: now,
     updatedAt: now,
+    deletedAt: null,
   };
 
   projects.push(project);
@@ -246,10 +248,18 @@ export async function createProject(input: ProjectCreate): Promise<Project> {
   return project;
 }
 
-export async function getProject(projectId: string): Promise<Project> {
+export async function loadActiveProjects(): Promise<Project[]> {
+  const projects = await loadProjects();
+  return projects.filter((p) => p.deletedAt === null || p.deletedAt === undefined);
+}
+
+export async function getProject(projectId: string, includeDeleted = false): Promise<Project> {
   const projects = await loadProjects();
   const project = projects.find((p) => p.id === projectId);
   if (!project) {
+    throw new NotFoundError(`Project "${projectId}" not found`);
+  }
+  if (!includeDeleted && project.deletedAt) {
     throw new NotFoundError(`Project "${projectId}" not found`);
   }
   return project;
@@ -263,6 +273,11 @@ export async function updateProject(projectId: string, update: ProjectUpdate): P
   }
 
   const existing = projects[idx]!;
+
+  // Reject updates on soft-deleted projects
+  if (existing.deletedAt) {
+    throw new NotFoundError(`Project "${projectId}" not found`);
+  }
 
   // Handle encryption password separately: encrypt at rest, then remove
   // the plaintext field from the update object before spreading.
@@ -308,7 +323,26 @@ export async function updateProjectStatus(
   await saveProjects(projects);
 }
 
-export async function deleteProject(projectId: string): Promise<void> {
+export async function softDeleteProject(projectId: string): Promise<void> {
+  const projects = await loadProjects();
+  const idx = projects.findIndex((p) => p.id === projectId);
+  if (idx === -1) {
+    throw new NotFoundError(`Project "${projectId}" not found`);
+  }
+  const existing = projects[idx]!;
+  if (existing.deletedAt) {
+    throw new NotFoundError(`Project "${projectId}" not found`);
+  }
+  const now = new Date().toISOString();
+  projects[idx] = {
+    ...existing,
+    deletedAt: now,
+    updatedAt: now,
+  };
+  await saveProjects(projects);
+}
+
+export async function hardDeleteProject(projectId: string): Promise<void> {
   const projects = await loadProjects();
   const idx = projects.findIndex((p) => p.id === projectId);
   if (idx === -1) {
@@ -316,6 +350,47 @@ export async function deleteProject(projectId: string): Promise<void> {
   }
   projects.splice(idx, 1);
   await saveProjects(projects);
+}
+
+export async function restoreProject(projectId: string): Promise<Project> {
+  const projects = await loadProjects();
+  const idx = projects.findIndex((p) => p.id === projectId);
+  if (idx === -1) {
+    throw new NotFoundError(`Project "${projectId}" not found`);
+  }
+  const existing = projects[idx]!;
+  if (!existing.deletedAt) {
+    throw new ConflictError(`Project "${projectId}" is not deleted`);
+  }
+  const restored: Project = {
+    ...existing,
+    deletedAt: null,
+    status: 'local-only',
+    updatedAt: new Date().toISOString(),
+  };
+  projects[idx] = restored;
+  await saveProjects(projects);
+  return restored;
+}
+
+export async function purgeExpiredProjects(retentionDays: number): Promise<number> {
+  const projects = await loadProjects();
+  const cutoff = Date.now() - retentionDays * 86_400_000;
+  const toKeep: Project[] = [];
+  let purged = 0;
+
+  for (const p of projects) {
+    if (p.deletedAt && new Date(p.deletedAt).getTime() < cutoff) {
+      purged++;
+    } else {
+      toKeep.push(p);
+    }
+  }
+
+  if (purged > 0) {
+    await saveProjects(toKeep);
+  }
+  return purged;
 }
 
 // ---------------------------------------------------------------------------
@@ -356,13 +431,15 @@ export async function addHistoryEntry(entry: SyncOperation): Promise<void> {
 export async function updateHistoryEntry(
   operationId: string,
   update: Partial<SyncOperation>,
-): Promise<void> {
+): Promise<boolean> {
   const operations = await loadHistory();
   const idx = operations.findIndex((op) => op.id === operationId);
   if (idx !== -1 && operations[idx]) {
     operations[idx] = { ...operations[idx], ...update } as SyncOperation;
     await saveHistory(operations);
+    return true;
   }
+  return false;
 }
 
 // ---------------------------------------------------------------------------

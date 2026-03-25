@@ -98,7 +98,8 @@ Input validated with Zod schemas at the route level:
 | GET | `/api/sync/projects/:id` | Admin | Get project |
 | POST | `/api/sync/projects` | Admin | Create project |
 | PATCH | `/api/sync/projects/:id` | Admin | Update project |
-| DELETE | `/api/sync/projects/:id` | Admin | Delete project |
+| DELETE | `/api/sync/projects/:id` | Admin | Delete project (soft or hard) |
+| POST | `/api/sync/projects/:id/undelete` | Admin | Restore soft-deleted project |
 | POST | `/api/sync/projects/:id/sync` | Admin | Trigger sync |
 | POST | `/api/sync/projects/:id/archive` | Admin | Start archive |
 | POST | `/api/sync/projects/:id/restore` | Admin | Start restore |
@@ -108,6 +109,9 @@ Input validated with Zod schemas at the route level:
 | GET | `/api/sync/status` | Admin | Global sync status |
 | GET | `/api/sync/history` | Admin | Sync operation log |
 | GET | `/api/sync/savings` | Admin | Global archive savings |
+| GET | `/api/sync/projects/:id/trash` | Admin | List trash entries |
+| POST | `/api/sync/projects/:id/purge-trash` | Admin | Purge expired trash |
+| POST | `/api/sync/projects/:id/restore-trash` | Admin | Restore files from trash |
 | GET | `/api/sync/agents` | Admin | List agents |
 | GET | `/api/sync/agents/:id` | Admin | Get agent |
 | POST | `/api/sync/agents` | Agent | Register agent |
@@ -121,16 +125,18 @@ Input validated with Zod schemas at the route level:
 
 | Input | Rules |
 | --- | --- |
-| Project name | 1-100 characters |
+| Project ID | Lowercase alphanumeric and hyphens only (`^[a-z0-9-]+$`), 1-100 chars |
+| Project name | 1-100 characters, no control characters |
 | Local path | Absolute, no null bytes, no `..`, max 4096 chars |
 | Remote path | No null bytes, no `..`, max 4096 chars |
-| Provider type | One of: `spaces`, `s3`, `gcs`, `azure`, `b2`, `custom` |
+| Provider type | One of: `spaces`, `s3`, `gcs`, `azure`, `b2`, `custom`, `local` |
 | Direction | One of: `push`, `pull`, `bidirectional` |
 | Trigger | One of: `manual`, `watch`, `schedule`, `watch+schedule` |
 | Conflict strategy | One of: `newest-wins`, `local-wins`, `remote-wins`, `manual` |
-| Schedule | Valid 5-field cron expression |
-| Encryption password | Minimum 8 characters |
+| Schedule | Valid 5-field cron expression (no seconds field) |
+| Encryption password | Minimum 12 characters |
 | Bandwidth limit | Valid rclone bwlimit format (e.g., `10M`, `500k`) |
+| Include/exclude patterns | 1-500 chars each, max 100 patterns, no null bytes, no rclone filter prefixes (`+`, `-`, `!`) |
 
 ## Quick Reference
 

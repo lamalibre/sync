@@ -19,18 +19,18 @@ log_section "Modify files in remote bucket"
 # ---------------------------------------------------------------------------
 
 # Add a new file to the remote bucket directly
-agent_exec "echo 'New remote file' > /tmp/sync-e2e-bucket/e2e-test-project/remote-new.txt"
-assert_file_on_agent "/tmp/sync-e2e-bucket/e2e-test-project/remote-new.txt" "New file created in remote bucket"
+agent_exec "echo 'New remote file' > /tmp/sync-e2e-bucket/projects/e2e-test-project/remote-new.txt"
+assert_file_on_agent "/tmp/sync-e2e-bucket/projects/e2e-test-project/remote-new.txt" "New file created in remote bucket"
 
 # Modify an existing file in the bucket
-agent_exec "echo 'Updated data from remote' > /tmp/sync-e2e-bucket/e2e-test-project/data.txt"
+agent_exec "echo 'Updated data from remote' > /tmp/sync-e2e-bucket/projects/e2e-test-project/data.txt"
 
 # ---------------------------------------------------------------------------
 log_section "Get project ID"
 # ---------------------------------------------------------------------------
 
 PROJECTS=$(api_get "projects")
-PROJECT_ID=$(echo "$PROJECTS" | jq -r '.projects[0].id' 2>/dev/null || echo "")
+PROJECT_ID=$(echo "$PROJECTS" | jq -r '.projects[] | select(.name == "e2e-test-project") | .id' 2>/dev/null || echo "")
 assert_not_eq "$PROJECT_ID" "" "Project ID retrieved"
 
 # ---------------------------------------------------------------------------
@@ -65,8 +65,8 @@ assert_eq "$UPDATED" "Updated data from remote" "Modified file content pulled"
 log_section "Verify pull recorded in history"
 # ---------------------------------------------------------------------------
 
-HISTORY=$(api_get "projects/${PROJECT_ID}/history")
-LAST_OP=$(echo "$HISTORY" | jq -r '.history[0].direction' 2>/dev/null || echo "")
+HISTORY=$(api_get "history?projectId=${PROJECT_ID}")
+LAST_OP=$(echo "$HISTORY" | jq -r '.operations[0].direction' 2>/dev/null || echo "")
 assert_eq "$LAST_OP" "pull" "Last operation was a pull"
 
 end_test

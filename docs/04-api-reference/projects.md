@@ -57,6 +57,9 @@ Create a new sync project.
 
 ### `GET /api/sync/projects`
 
+**Query parameters:**
+- `includeDeleted=true` — include soft-deleted projects in the response (default: `false`)
+
 **Response (200):**
 
 ```json
@@ -73,13 +76,14 @@ Create a new sync project.
       "encrypted": true,
       "watch": true,
       "trigger": "watch+schedule",
-      "schedule": "0 */6 * * *"
+      "schedule": "0 */6 * * *",
+      "deletedAt": null
     }
   ]
 }
 ```
 
-Encryption passwords are redacted in the response.
+Encryption passwords are redacted in the response. By default, soft-deleted projects are excluded from the list.
 
 ## Get Project
 
@@ -130,10 +134,10 @@ Only provided fields are updated.
 
 ### `DELETE /api/sync/projects/:projectId`
 
-Delete a project definition. Does not delete local or remote files by default.
+Soft-delete a project by default. The project is marked with a `deletedAt` timestamp and excluded from normal queries, but remains recoverable via the restore endpoint.
 
 **Query parameters:**
-- `deleteRemote=true` — also delete remote files in the cloud bucket
+- `permanent=true` — permanently remove the project (hard delete, cannot be undone)
 
 **Response (200):**
 
@@ -146,11 +150,69 @@ Delete a project definition. Does not delete local or remote files by default.
 **Errors:**
 - `404` — Project not found
 
+## Restore Deleted Project
+
+### `POST /api/sync/projects/:projectId/undelete`
+
+Restore a soft-deleted project. Sets `deletedAt` back to `null` and status to `local-only`.
+
+**Response (200):**
+
+```json
+{
+  "ok": true,
+  "project": { ... }
+}
+```
+
+**Errors:**
+- `404` — Project not found
+- `409` — Project is not deleted
+
+## Restore Files from Trash
+
+### `POST /api/sync/projects/:projectId/restore-trash`
+
+Restore files from a timestamped trash directory back to the project's local path.
+
+**Request body (optional):**
+
+```json
+{
+  "timestamp": "2026-03-25T00-00-00-000Z"
+}
+```
+
+**Response (200):**
+
+```json
+{
+  "ok": true,
+  "operationId": "550e8400-e29b-41d4-a716-446655440000",
+  "timestamp": "2026-03-25T00-00-00-000Z"
+}
+```
+
+**Errors:**
+- `400` — Storage not configured
+- `404` — Project not found
+- `409` — Operation already in progress
+
 ## Trigger Sync
 
 ### `POST /api/sync/projects/:projectId/sync`
 
 Start a manual sync operation.
+
+**Request body (optional):**
+
+```json
+{
+  "direction": "push"
+}
+```
+
+When provided, `direction` overrides the project's configured direction for this operation only. Must be one of `push`, `pull`, or `bidirectional`.
 
 **Response (200):**
 
@@ -163,6 +225,8 @@ Start a manual sync operation.
 ```
 
 **Errors:**
+- `400` — Project is deleted (restore it first)
+- `400` — Storage not configured
 - `404` — Project not found
 - `409` — Sync already in progress for this project
 
@@ -183,8 +247,9 @@ Start an archive operation (move files to cloud, create stub).
 ```
 
 **Errors:**
+- `400` — Project is deleted or already archived
+- `400` — Storage not configured
 - `404` — Project not found
-- `400` — Project is already archived
 - `409` — Another operation is in progress
 
 ## Trigger Restore
@@ -207,6 +272,54 @@ The restore endpoint also supports optional single-file restore via a `filePath`
 
 **Errors:**
 - `400` — Project is not archived
+- `400` — Project is deleted
+- `400` — Storage not configured
+- `404` — Project not found
+- `409` — Another operation is in progress
+
+## Purge Trash
+
+### `POST /api/sync/projects/:projectId/purge-trash`
+
+Request cleanup of backup files created by `--backup-dir` during sync operations.
+
+**Request body (optional):**
+
+```json
+{
+  "olderThanDays": 7
+}
+```
+
+**Response (200):**
+
+```json
+{
+  "ok": true,
+  "operationId": "550e8400-e29b-41d4-a716-446655440000",
+  "olderThanDays": 7
+}
+```
+
+**Errors:**
+- `404` — Project not found
+
+## List Trash
+
+### `GET /api/sync/projects/:projectId/trash`
+
+Get trash metadata for a project.
+
+**Response (200):**
+
+```json
+{
+  "projectId": "training-data",
+  "entries": []
+}
+```
+
+**Errors:**
 - `404` — Project not found
 
 ## Project Status

@@ -292,6 +292,10 @@ assert_file_content_on_agent() {
 
 # ---------------------------------------------------------------------------
 # API request helpers (curl to host VM from macOS)
+#
+# The Authorization header is passed via a curl config file (process
+# substitution) rather than on the command line, so the API key does not
+# appear in `ps` output.
 # ---------------------------------------------------------------------------
 
 # api_get path
@@ -300,7 +304,7 @@ api_get() {
   curl -s \
     --max-time "$CURL_TIMEOUT" \
     -H "Accept: application/json" \
-    -H "Authorization: Bearer ${API_KEY}" \
+    -K <(printf 'header = "Authorization: Bearer %s"\n' "$API_KEY") \
     "${BASE_URL}/api/sync/${api_path}"
 }
 
@@ -313,7 +317,7 @@ api_post() {
     -X POST \
     -H "Content-Type: application/json" \
     -H "Accept: application/json" \
-    -H "Authorization: Bearer ${API_KEY}" \
+    -K <(printf 'header = "Authorization: Bearer %s"\n' "$API_KEY") \
     -d "$body" \
     "${BASE_URL}/api/sync/${api_path}"
 }
@@ -327,7 +331,7 @@ api_put() {
     -X PUT \
     -H "Content-Type: application/json" \
     -H "Accept: application/json" \
-    -H "Authorization: Bearer ${API_KEY}" \
+    -K <(printf 'header = "Authorization: Bearer %s"\n' "$API_KEY") \
     -d "$body" \
     "${BASE_URL}/api/sync/${api_path}"
 }
@@ -341,7 +345,7 @@ api_patch() {
     -X PATCH \
     -H "Content-Type: application/json" \
     -H "Accept: application/json" \
-    -H "Authorization: Bearer ${API_KEY}" \
+    -K <(printf 'header = "Authorization: Bearer %s"\n' "$API_KEY") \
     -d "$body" \
     "${BASE_URL}/api/sync/${api_path}"
 }
@@ -353,7 +357,7 @@ api_delete() {
     --max-time "$CURL_TIMEOUT" \
     -X DELETE \
     -H "Accept: application/json" \
-    -H "Authorization: Bearer ${API_KEY}" \
+    -K <(printf 'header = "Authorization: Bearer %s"\n' "$API_KEY") \
     "${BASE_URL}/api/sync/${api_path}"
 }
 
@@ -363,7 +367,7 @@ api_get_status() {
   curl -s -o /dev/null -w '%{http_code}' \
     --max-time "$CURL_TIMEOUT" \
     -H "Accept: application/json" \
-    -H "Authorization: Bearer ${API_KEY}" \
+    -K <(printf 'header = "Authorization: Bearer %s"\n' "$API_KEY") \
     "${BASE_URL}/api/sync/${api_path}" 2>/dev/null || echo "000"
 }
 
@@ -376,7 +380,7 @@ api_post_status() {
     -X POST \
     -H "Content-Type: application/json" \
     -H "Accept: application/json" \
-    -H "Authorization: Bearer ${API_KEY}" \
+    -K <(printf 'header = "Authorization: Bearer %s"\n' "$API_KEY") \
     -d "$body" \
     "${BASE_URL}/api/sync/${api_path}" 2>/dev/null || echo "000"
 }
@@ -388,7 +392,34 @@ api_delete_status() {
     --max-time "$CURL_TIMEOUT" \
     -X DELETE \
     -H "Accept: application/json" \
-    -H "Authorization: Bearer ${API_KEY}" \
+    -K <(printf 'header = "Authorization: Bearer %s"\n' "$API_KEY") \
+    "${BASE_URL}/api/sync/${api_path}" 2>/dev/null || echo "000"
+}
+
+# api_patch_status path json_body
+api_patch_status() {
+  local api_path="$1"
+  local body="$2"
+  curl -s -o /dev/null -w '%{http_code}' \
+    --max-time "$CURL_TIMEOUT" \
+    -X PATCH \
+    -H "Content-Type: application/json" \
+    -H "Accept: application/json" \
+    -K <(printf 'header = "Authorization: Bearer %s"\n' "$API_KEY") \
+    -d "$body" \
+    "${BASE_URL}/api/sync/${api_path}" 2>/dev/null || echo "000"
+}
+
+# api_raw_status method path [extra_headers...] — raw curl without Bearer token
+api_raw_status() {
+  local method="$1"
+  local api_path="$2"
+  shift 2
+  curl -s -o /dev/null -w '%{http_code}' \
+    --max-time "$CURL_TIMEOUT" \
+    -X "$method" \
+    -H "Accept: application/json" \
+    "$@" \
     "${BASE_URL}/api/sync/${api_path}" 2>/dev/null || echo "000"
 }
 

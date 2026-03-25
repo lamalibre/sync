@@ -19,7 +19,7 @@ log_section "Setup: get project ID and update to bidirectional"
 # ---------------------------------------------------------------------------
 
 PROJECTS=$(api_get "projects")
-PROJECT_ID=$(echo "$PROJECTS" | jq -r '.projects[0].id' 2>/dev/null || echo "")
+PROJECT_ID=$(echo "$PROJECTS" | jq -r '.projects[] | select(.name == "e2e-test-project") | .id' 2>/dev/null || echo "")
 assert_not_eq "$PROJECT_ID" "" "Project ID retrieved"
 
 # Update project to bidirectional sync
@@ -37,8 +37,8 @@ assert_file_on_agent "/tmp/sync-e2e-project/local-change.txt" "Local-side file c
 log_section "Make changes on remote side"
 # ---------------------------------------------------------------------------
 
-agent_exec "echo 'Remote-side change' > /tmp/sync-e2e-bucket/e2e-test-project/remote-change.txt"
-assert_file_on_agent "/tmp/sync-e2e-bucket/e2e-test-project/remote-change.txt" "Remote-side file created"
+agent_exec "echo 'Remote-side change' > /tmp/sync-e2e-bucket/projects/e2e-test-project/remote-change.txt"
+assert_file_on_agent "/tmp/sync-e2e-bucket/projects/e2e-test-project/remote-change.txt" "Remote-side file created"
 
 # ---------------------------------------------------------------------------
 log_section "Trigger bidirectional sync"
@@ -60,7 +60,7 @@ log_section "Verify both sides are merged"
 # ---------------------------------------------------------------------------
 
 # Local-side change should appear in remote
-REMOTE_LOCAL=$(agent_exec "cat /tmp/sync-e2e-bucket/e2e-test-project/local-change.txt 2>/dev/null || echo ''")
+REMOTE_LOCAL=$(agent_exec "cat /tmp/sync-e2e-bucket/projects/e2e-test-project/local-change.txt 2>/dev/null || echo ''")
 assert_eq "$REMOTE_LOCAL" "Local-side change" "Local change propagated to remote"
 
 # Remote-side change should appear in local
@@ -71,8 +71,8 @@ assert_eq "$LOCAL_REMOTE" "Remote-side change" "Remote change propagated to loca
 log_section "Verify bisync recorded in history"
 # ---------------------------------------------------------------------------
 
-HISTORY=$(api_get "projects/${PROJECT_ID}/history")
-LAST_OP=$(echo "$HISTORY" | jq -r '.history[0].direction' 2>/dev/null || echo "")
+HISTORY=$(api_get "history?projectId=${PROJECT_ID}")
+LAST_OP=$(echo "$HISTORY" | jq -r '.operations[0].direction' 2>/dev/null || echo "")
 assert_eq "$LAST_OP" "bidirectional" "Last operation was bidirectional"
 
 end_test

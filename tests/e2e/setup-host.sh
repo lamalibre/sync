@@ -14,6 +14,13 @@
 
 set -euo pipefail
 
+# Guard: this script must run inside a Linux VM, not on macOS
+if [[ "$(uname -s)" != "Linux" ]]; then
+  echo "ERROR: setup-host.sh must run inside a Linux VM, not on $(uname -s)."
+  echo "It is invoked automatically by the MCP provision_host tool."
+  exit 1
+fi
+
 PORT="${1:-9393}"
 SYNC_DIR="/opt/sync"
 CREDS_FILE="/tmp/sync-e2e-credentials.json"
@@ -37,7 +44,6 @@ Type=simple
 User=root
 WorkingDirectory=${SYNC_DIR}
 ExecStart=/usr/bin/node ${SYNC_DIR}/packages/sync-server/bin/sync-server.mjs
-Environment=NODE_ENV=development
 Environment=SYNC_PORT=${PORT}
 Environment=SYNC_HOST=0.0.0.0
 Restart=on-failure

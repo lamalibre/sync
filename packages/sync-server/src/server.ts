@@ -9,8 +9,11 @@ import { statusRoutes } from './routes/status.js';
 import { agentRoutes } from './routes/agent.js';
 import { agentRegistryRoutes } from './routes/agents.js';
 import { archiveRoutes } from './routes/archive.js';
+import { trashRoutes } from './routes/trash.js';
 import { setupRoutes } from './routes/setup.js';
 import { registerAuthHook } from './lib/auth.js';
+import { purgeExpiredProjects, loadConfig } from './lib/state.js';
+import { DEFAULT_SOFT_DELETE_CONFIG } from '@lamalibre/sync-shared';
 
 export interface BuildServerOptions {
   logger?: boolean;
@@ -70,7 +73,24 @@ export async function buildServer(opts: BuildServerOptions = {}) {
   await app.register(agentRoutes);
   await app.register(agentRegistryRoutes);
   await app.register(archiveRoutes);
+  await app.register(trashRoutes);
   await app.register(setupRoutes);
+
+  // Periodically purge soft-deleted projects past retention (every 6 hours)
+  const PURGE_INTERVAL_MS = 6 * 60 * 60 * 1000;
+  const purgeTimer = setInterval(async () => {
+    try {
+      const config = await loadConfig();
+      const retentionDays = config.softDelete?.retentionDays ?? DEFAULT_SOFT_DELETE_CONFIG.retentionDays;
+      const purged = await purgeExpiredProjects(retentionDays);
+      if (purged > 0) {
+        app.log.info({ purged }, 'Purged expired soft-deleted projects');
+      }
+    } catch (err: unknown) {
+      app.log.warn({ err: err instanceof Error ? err.message : String(err) }, 'Failed to purge expired projects');
+    }
+  }, PURGE_INTERVAL_MS);
+  purgeTimer.unref();
 
   return app;
 }

@@ -12,9 +12,10 @@ import type {
   ProjectStatus,
   ConflictStrategy,
   SyncTrigger,
+  SoftDeleteConfig,
 } from '@lamalibre/sync-shared';
 
-export type { ProviderType, SyncDirection, ProjectStatus, ConflictStrategy, SyncTrigger };
+export type { ProviderType, SyncDirection, ProjectStatus, ConflictStrategy, SyncTrigger, SoftDeleteConfig };
 
 /** A conflict detected during bisync. */
 export interface BisyncConflict {
@@ -74,6 +75,24 @@ export interface ProjectDefinition {
   readonly conflictStrategy?: ConflictStrategy;
   readonly trigger?: SyncTrigger;
   readonly watchDebounceMs?: number;
+  readonly softDelete?: SoftDeleteConfig;
+  /**
+   * Operation ID assigned by the server for a pending sync.
+   * When present, the agent must use this ID (instead of generating a new one)
+   * so the server can correlate the agent report with the history entry.
+   */
+  readonly pendingOperationId?: string;
+  /**
+   * Direction override for a pending sync operation.
+   * When the API caller specifies a direction different from the project's default,
+   * this field carries that override so the agent uses the correct direction.
+   */
+  readonly pendingDirection?: SyncDirection;
+  /**
+   * Type of pending operation: 'sync', 'archive', or 'restore'.
+   * Used by the agent to determine which operation to run.
+   */
+  readonly pendingType?: 'sync' | 'archive' | 'restore';
 }
 
 /** Agent configuration returned by the server's GET /api/sync/agent/config endpoint. */
@@ -81,6 +100,7 @@ export interface AgentConfig {
   readonly provider: ProviderConfig;
   readonly projects: readonly ProjectDefinition[];
   readonly defaultBandwidthLimit?: string;
+  readonly softDelete?: SoftDeleteConfig;
 }
 
 /** Local agent settings stored in ~/.sync-agent/agent-settings.json. */
@@ -154,6 +174,7 @@ export interface RcloneSyncOptions {
   readonly bucket: string;
   readonly excludes: readonly string[];
   readonly bandwidthLimit?: string;
+  readonly softDelete?: SoftDeleteConfig;
   readonly onProgress?: (progress: SyncProgress) => void;
 }
 
@@ -170,5 +191,6 @@ export interface RcloneBisyncOptions {
   readonly bandwidthLimit?: string;
   readonly resync: boolean;
   readonly conflictStrategy: ConflictStrategy;
+  readonly softDelete?: SoftDeleteConfig;
   readonly onProgress?: (progress: SyncProgress) => void;
 }

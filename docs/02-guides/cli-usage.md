@@ -52,7 +52,7 @@ Flags:
 
 ### sync trigger
 
-Trigger a manual sync:
+Trigger a manual sync (`sync sync` also works as an alias):
 
 ```bash
 sync trigger
@@ -127,19 +127,95 @@ Flags:
 
 ### sync config
 
-Show or update CLI configuration:
+Show current CLI configuration and server storage status:
 
 ```bash
-# Show current config
 sync config
-
-# Set config values
-sync config --server http://192.168.1.100:9393 --api-key <key>
 ```
 
 Flags:
-- `--server <url>` — set server URL
-- `--api-key <key>` — set API key (stored encrypted)
+- `--json` — output as JSON
+
+> **Note:** The `--server` and `--api-key` flags are global flags available on all commands. They override the server URL and API key for that single invocation only — they do not persist to disk.
+
+### sync project-delete
+
+Delete a project (soft delete by default, recoverable):
+
+```bash
+sync project-delete my-project
+```
+
+Hard delete (permanent, cannot be undone):
+
+```bash
+sync project-delete my-project --permanent --yes
+```
+
+Flags:
+- `--project <name>` — project to delete
+- `--permanent` — permanently delete (cannot be undone)
+- `--yes` — skip confirmation prompt
+- `--json` — output as JSON
+
+### sync project-restore
+
+Restore a soft-deleted project:
+
+```bash
+sync project-restore my-project
+```
+
+Interactive: lists only deleted projects to choose from.
+
+Flags:
+- `--project <name>` — project to restore
+- `--yes` — skip confirmation prompt
+- `--json` — output as JSON
+
+### sync trash-list
+
+List trash entries (backup files from sync operations):
+
+```bash
+sync trash-list my-project
+```
+
+Flags:
+- `--project <name>` — project to inspect
+- `--json` — output as JSON
+
+### sync trash-purge
+
+Purge trash for a project:
+
+```bash
+sync trash-purge my-project --older-than 7d --yes
+```
+
+Flags:
+- `--project <name>` — project to purge trash for
+- `--older-than <Nd>` — only purge trash older than N days (e.g., `7d`, `30d`)
+- `--yes` — skip confirmation prompt
+- `--json` — output as JSON
+
+### sync trash-restore
+
+Restore files from a project's sync trash (backup files created by `--backup-dir`):
+
+```bash
+sync trash-restore my-project
+```
+
+Restore a specific timestamp version:
+
+```bash
+sync trash-restore my-project 2026-03-24T10-30-00-000Z
+```
+
+Flags:
+- `--project <name>` — project to restore trash for
+- `--yes` — skip confirmation prompt
 - `--json` — output as JSON
 
 ### sync uninstall

@@ -20,12 +20,9 @@ log_section "Create an encrypted project"
 ENCRYPT_CONFIG='{
   "name": "e2e-encrypted-project",
   "localPath": "/tmp/sync-e2e-project-encrypted",
-  "remotePath": "test-remote:/tmp/sync-e2e-bucket/e2e-encrypted",
-  "syncDirection": "push",
-  "encryption": {
-    "enabled": true,
-    "password": "e2e-test-password-123"
-  }
+  "direction": "push",
+  "encrypted": true,
+  "encryptionPassword": "e2e-test-password-123456"
 }'
 
 RESPONSE=$(api_post "projects" "$ENCRYPT_CONFIG")
@@ -59,14 +56,16 @@ assert_eq "$RESULT" "0" "Encrypted push completed"
 log_section "Verify remote files are encrypted (not readable as plaintext)"
 # ---------------------------------------------------------------------------
 
-# The encrypted bucket should contain files but NOT readable as plaintext
-REMOTE_FILES=$(agent_exec "ls /tmp/sync-e2e-bucket/e2e-encrypted/ 2>/dev/null || echo ''")
-assert_not_eq "$REMOTE_FILES" "" "Encrypted remote has files"
+# The encrypted bucket should contain files but NOT readable as plaintext.
+# With rclone crypt, filenames and directory paths are encrypted.
+# The encrypted files will NOT be under a recognizable path — they'll have random-looking names.
+# Check that new files appeared in the bucket that aren't under the plaintext project dirs.
+ENCRYPTED_DIRS=$(agent_exec "ls /tmp/sync-e2e-bucket/ 2>/dev/null | grep -v projects || echo ''")
+assert_not_eq "$ENCRYPTED_DIRS" "" "Encrypted remote has files (encrypted path names)"
 
-# The filenames should be encrypted (not matching original names)
-# or if filenames aren't encrypted, the content should be
-REMOTE_CONTENT=$(agent_exec "cat /tmp/sync-e2e-bucket/e2e-encrypted/secret.txt 2>/dev/null || echo 'encrypted'")
-assert_not_eq "$REMOTE_CONTENT" "Secret data" "Remote file content is not plaintext"
+# The plaintext filename should NOT exist anywhere in the bucket
+PLAINTEXT_CHECK=$(agent_exec "find /tmp/sync-e2e-bucket -name 'secret.txt' 2>/dev/null | head -1 || echo ''")
+assert_eq "$PLAINTEXT_CHECK" "" "Original filename not present in remote (encrypted)"
 
 # ---------------------------------------------------------------------------
 log_section "Delete local files and pull (decrypt)"

@@ -1,7 +1,7 @@
 import type { FastifyInstance } from 'fastify';
 import type { ZodTypeProvider } from 'fastify-type-provider-zod';
 import { z } from 'zod';
-import { historyQuerySchema } from '../lib/schemas.js';
+import { projectIdSchema, historyQuerySchema } from '../lib/schemas.js';
 import {
   loadConfig,
   loadProjects,
@@ -41,7 +41,7 @@ export async function statusRoutes(app: FastifyInstance): Promise<void> {
     {
       schema: {
         params: z.object({
-          projectId: z.string().min(1),
+          projectId: projectIdSchema,
         }),
       },
     },

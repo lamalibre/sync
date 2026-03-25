@@ -151,10 +151,12 @@ All REST inputs validated with Zod schemas at the route level:
 | --- | --- |
 | Path fields | No null bytes, no `..`, max 4096 chars, absolute path |
 | Project name | 1-100 chars |
-| Provider type | One of: spaces, s3, gcs, azure, b2, custom |
-| Cron expression | Valid 5-field cron syntax |
-| Encryption password | Min 8 characters |
+| Project ID | Lowercase alphanumeric + hyphens only, 1-100 chars |
+| Provider type | One of: spaces, s3, gcs, azure, b2, custom, local |
+| Cron expression | Valid 5-field cron syntax (no seconds field) |
+| Encryption password | Min 12 characters |
 | Bandwidth limit | Valid rclone bwlimit format |
+| Include/exclude patterns | No null bytes, no rclone filter prefixes (+, -, !), max 100 patterns |
 
 ### Execa Array Arguments
 

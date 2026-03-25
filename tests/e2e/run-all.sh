@@ -29,8 +29,10 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 : "${BASE_URL:?BASE_URL must be set}"
 : "${API_KEY:?API_KEY must be set}"
 
-# Log directory for per-test Markdown logs
-: "${LOG_DIR:=/tmp}"
+# Log directory for per-test Markdown logs (use unique temp dir to prevent symlink attacks)
+if [ -z "${LOG_DIR:-}" ]; then
+  LOG_DIR=$(mktemp -d "${TMPDIR:-/tmp}/sync-e2e-logs.XXXXXXXX")
+fi
 
 # Colours
 if [ -t 1 ]; then
@@ -74,6 +76,8 @@ TEST_SCRIPTS=(
   "10-encryption.sh"
   "11-scheduled-sync.sh"
   "12-plugin-mode.sh"
+  "13-soft-delete.sh"
+  "14-error-paths.sh"
 )
 
 PASSED=0

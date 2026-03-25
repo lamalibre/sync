@@ -22,12 +22,12 @@ pnpm install
 ### Running the server in development
 
 ```bash
-export NODE_ENV=development
+export SYNC_SKIP_AUTH=1
 pnpm dev:server   # Fastify on :9393
 ```
 
-In development mode, `NODE_ENV=development` disables authentication checks so you
-can test the API without certificates.
+Setting `SYNC_SKIP_AUTH=1` disables authentication checks for development.
+This only works when the server listens on a loopback address (127.0.0.1, localhost, ::1).
 
 ### Running E2E tests
 

@@ -1,14 +1,18 @@
 import type { FastifyInstance } from 'fastify';
 import type { ZodTypeProvider } from 'fastify-type-provider-zod';
 import { z } from 'zod';
-import { projectCreateSchema, projectUpdateSchema, type Project } from '../lib/schemas.js';
+import { projectIdSchema, projectCreateSchema, projectUpdateSchema, type Project } from '../lib/schemas.js';
 import {
   loadProjects,
+  loadActiveProjects,
   loadConfig,
   createProject,
   getProject,
   updateProject,
-  deleteProject,
+  softDeleteProject,
+  hardDeleteProject,
+  restoreProject,
+  getActiveOperation,
   clearActiveOperation,
   NotFoundError,
   ConflictError,
@@ -79,11 +83,22 @@ export async function projectRoutes(app: FastifyInstance): Promise<void> {
     },
   );
 
-  // GET /api/sync/projects — list all projects
-  server.get('/api/sync/projects', async (_request, reply) => {
-    const projects = await loadProjects();
-    return reply.send({ projects: projects.map(redactProject) });
-  });
+  // GET /api/sync/projects — list projects (active by default)
+  server.get(
+    '/api/sync/projects',
+    {
+      schema: {
+        querystring: z.object({
+          includeDeleted: z.enum(['true', 'false']).optional().default('false'),
+        }),
+      },
+    },
+    async (request, reply) => {
+      const includeDeleted = request.query.includeDeleted === 'true';
+      const projects = includeDeleted ? await loadProjects() : await loadActiveProjects();
+      return reply.send({ projects: projects.map(redactProject) });
+    },
+  );
 
   // GET /api/sync/projects/:projectId — get project details
   server.get(
@@ -91,7 +106,7 @@ export async function projectRoutes(app: FastifyInstance): Promise<void> {
     {
       schema: {
         params: z.object({
-          projectId: z.string().min(1),
+          projectId: projectIdSchema,
         }),
       },
     },
@@ -114,7 +129,7 @@ export async function projectRoutes(app: FastifyInstance): Promise<void> {
     {
       schema: {
         params: z.object({
-          projectId: z.string().min(1),
+          projectId: projectIdSchema,
         }),
         body: projectUpdateSchema,
       },
@@ -132,25 +147,66 @@ export async function projectRoutes(app: FastifyInstance): Promise<void> {
     },
   );
 
-  // DELETE /api/sync/projects/:projectId — delete project
+  // DELETE /api/sync/projects/:projectId — soft delete (default) or hard delete (?permanent=true)
   server.delete(
     '/api/sync/projects/:projectId',
     {
       schema: {
         params: z.object({
-          projectId: z.string().min(1),
+          projectId: projectIdSchema,
+        }),
+        querystring: z.object({
+          permanent: z.enum(['true', 'false']).optional().default('false'),
         }),
       },
     },
     async (request, reply) => {
       try {
-        // Clear any active operation for this project
+        const permanent = request.query.permanent === 'true';
+        const active = getActiveOperation(request.params.projectId);
+        if (active) {
+          return reply.status(409).send({
+            ok: false,
+            error: `Operation already in progress for project "${request.params.projectId}"`,
+            operationId: active.operationId,
+          });
+        }
         clearActiveOperation(request.params.projectId);
-        await deleteProject(request.params.projectId);
+        if (permanent) {
+          await hardDeleteProject(request.params.projectId);
+        } else {
+          await softDeleteProject(request.params.projectId);
+        }
         return reply.send({ ok: true });
       } catch (err: unknown) {
         if (err instanceof NotFoundError) {
           return reply.status(404).send({ ok: false, error: err.message });
+        }
+        throw err;
+      }
+    },
+  );
+
+  // POST /api/sync/projects/:projectId/undelete — restore a soft-deleted project
+  server.post(
+    '/api/sync/projects/:projectId/undelete',
+    {
+      schema: {
+        params: z.object({
+          projectId: projectIdSchema,
+        }),
+      },
+    },
+    async (request, reply) => {
+      try {
+        const project = await restoreProject(request.params.projectId);
+        return reply.send({ ok: true, project: redactProject(project) });
+      } catch (err: unknown) {
+        if (err instanceof NotFoundError) {
+          return reply.status(404).send({ ok: false, error: err.message });
+        }
+        if (err instanceof ConflictError) {
+          return reply.status(409).send({ ok: false, error: err.message });
         }
         throw err;
       }

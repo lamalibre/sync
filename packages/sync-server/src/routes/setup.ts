@@ -1,3 +1,4 @@
+import { timingSafeEqual } from 'node:crypto';
 import type { FastifyInstance, FastifyRequest, FastifyReply } from 'fastify';
 import { generateApiKey, clearAuthCache } from '../lib/auth.js';
 import { loadConfig, saveConfig } from '../lib/state.js';
@@ -31,7 +32,11 @@ export async function setupRoutes(app: FastifyInstance): Promise<void> {
       const setupToken = request.server.setupToken;
       if (setupToken) {
         const providedToken = request.headers['x-setup-token'] as string | undefined;
-        if (!providedToken || providedToken !== setupToken) {
+        if (
+          !providedToken ||
+          providedToken.length !== setupToken.length ||
+          !timingSafeEqual(Buffer.from(providedToken), Buffer.from(setupToken))
+        ) {
           return reply.status(401).send({
             ok: false,
             error: 'Setup token required. Check server logs.',

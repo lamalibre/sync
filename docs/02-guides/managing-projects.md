@@ -62,10 +62,11 @@ curl -X POST http://localhost:9393/api/sync/projects \
 | `excludes` | No | `[".git", ".DS_Store", "*.tmp"]` | Glob patterns to skip |
 | `includes` | No | `[]` | Glob patterns to include (overrides excludes) |
 | `encrypted` | No | `false` | Enable client-side encryption |
-| `encryptionPassword` | No | — | Per-project encryption password (min 8 chars) |
+| `encryptionPassword` | No | — | Per-project encryption password (min 12 chars) |
 | `conflictStrategy` | No | `newest-wins` | `newest-wins`, `local-wins`, `remote-wins`, `manual` |
 | `watchDebounceMs` | No | `5000` | Milliseconds to wait after last file change |
 | `bandwidthLimit` | No | — | rclone bandwidth limit (e.g., `10M`, `500k`) |
+| `softDelete` | No | Global default | Per-project soft delete override: `{ enabled, retentionDays, cleanupSchedule }` |
 
 ## Updating a Project
 
@@ -83,15 +84,30 @@ Only the fields you provide are updated. The agent picks up changes on its next 
 
 ## Deleting a Project
 
+By default, deleting a project performs a **soft delete** — the project is marked with a `deletedAt` timestamp but remains recoverable:
+
 ```bash
 curl -X DELETE http://localhost:9393/api/sync/projects/training-data \
   -H "Authorization: Bearer <api-key>"
 ```
 
-By default, this does not delete local or remote files. To also delete the remote copy:
+Soft-deleted projects are hidden from `GET /api/sync/projects` but visible with `?includeDeleted=true`. Sync, archive, and restore operations are blocked on deleted projects.
+
+### Restoring a Deleted Project
 
 ```bash
-curl -X DELETE "http://localhost:9393/api/sync/projects/training-data?deleteRemote=true" \
+curl -X POST http://localhost:9393/api/sync/projects/training-data/undelete \
+  -H "Authorization: Bearer <api-key>"
+```
+
+The project returns to `local-only` status after restoration.
+
+### Permanent Delete
+
+To permanently remove a project (cannot be undone):
+
+```bash
+curl -X DELETE "http://localhost:9393/api/sync/projects/training-data?permanent=true" \
   -H "Authorization: Bearer <api-key>"
 ```
 

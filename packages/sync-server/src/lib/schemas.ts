@@ -1,5 +1,6 @@
 import { z } from 'zod';
 import {
+  PROVIDER_TYPES,
   SYNC_DIRECTIONS,
   CONFLICT_STRATEGIES,
   SYNC_TRIGGERS,
@@ -10,6 +11,7 @@ import type {
   ConflictStrategy,
   SyncTrigger,
   ProjectStatus,
+  SoftDeleteConfig,
 } from '@lamalibre/sync-shared';
 
 // ---------------------------------------------------------------------------
@@ -37,11 +39,14 @@ export const localPathSchema = safePath('localPath').refine(
 
 export const remotePathSchema = safePath('remotePath');
 
+/** Project IDs are slugified: lowercase alphanumeric + hyphens only. */
+export const projectIdSchema = z.string().min(1).max(100).regex(/^[a-z0-9-]+$/, 'Invalid project ID format');
+
 // ---------------------------------------------------------------------------
 // Provider / Storage
 // ---------------------------------------------------------------------------
 
-export const providerTypeSchema = z.enum(['spaces', 's3', 'gcs', 'azure', 'b2', 'custom']);
+export const providerTypeSchema = z.enum(PROVIDER_TYPES);
 
 export type ProviderType = z.infer<typeof providerTypeSchema>;
 
@@ -57,7 +62,11 @@ export const storageConfigSchema = z.object({
   accessKey: z.string().min(1).refine(noNewlines, noNewlinesMsg),
   secretKey: z.string().min(1).refine(noNewlines, noNewlinesMsg),
   encryption: z.boolean().optional().default(false),
-  encryptionPassword: z.string().refine(noNewlines, noNewlinesMsg).optional(),
+  encryptionPassword: z
+    .string()
+    .min(12, 'Encryption password must be at least 12 characters')
+    .refine(noNewlines, noNewlinesMsg)
+    .optional(),
 });
 
 export type StorageConfig = z.infer<typeof storageConfigSchema>;
@@ -71,6 +80,41 @@ export const storageUpdateSchema = storageConfigSchema.refine(
   },
   { message: 'encryptionPassword is required when encryption is true' },
 );
+
+// ---------------------------------------------------------------------------
+// Cron expression validation
+// ---------------------------------------------------------------------------
+
+// Validate a standard 5-field cron expression (minute hour day month weekday).
+// Accepts numbers, ranges (1-5), steps (star/5), lists (1,3,5), and wildcards.
+// Does NOT accept the optional seconds field to prevent sub-minute scheduling.
+const CRON_FIELD = /^(\*|\d{1,2}(-\d{1,2})?(,\d{1,2}(-\d{1,2})?)*)(\/(0*[1-9]\d?))?$/;
+
+function isValidCron(expr: string): boolean {
+  const fields = expr.trim().split(/\s+/);
+  if (fields.length !== 5) return false;
+  return fields.every((f) => CRON_FIELD.test(f));
+}
+
+const cronSchema = z
+  .string()
+  .refine(isValidCron, 'Must be a valid 5-field cron expression (minute hour day month weekday)');
+
+// ---------------------------------------------------------------------------
+// Soft delete
+// ---------------------------------------------------------------------------
+
+export const softDeleteConfigSchema = z.object({
+  enabled: z.boolean().optional().default(true),
+  retentionDays: z.number().int().min(1).max(3650).optional().default(90),
+  cleanupSchedule: cronSchema.optional().default('0 3 * * *'),
+});
+
+export const purgeTrashSchema = z.object({
+  olderThanDays: z.number().int().min(1, 'olderThanDays must be at least 1').optional(),
+});
+
+export type { SoftDeleteConfig };
 
 // ---------------------------------------------------------------------------
 // Direction & conflict strategy
@@ -87,31 +131,49 @@ export const syncTriggerSchema = z.enum(SYNC_TRIGGERS);
 // Project
 // ---------------------------------------------------------------------------
 
+const projectNameSchema = z
+  .string()
+  .min(1)
+  .max(100)
+  .refine((v) => !/[\x00-\x1f]/.test(v), 'Name must not contain control characters');
+
 export const projectCreateSchema = z.object({
-  name: z.string().min(1).max(100),
+  name: projectNameSchema,
   localPath: localPathSchema,
   remotePath: remotePathSchema.optional(),
   direction: directionSchema.optional().default('push'),
-  includes: z.array(z.string()).optional().default([]),
+  includes: z
+    .array(
+      z
+        .string()
+        .min(1)
+        .max(500)
+        .refine((s) => !s.includes('\0'), 'Pattern must not contain null bytes')
+        .refine((s) => !/^[+\-!]/.test(s), 'Pattern must not start with rclone filter prefixes (+, -, !)'),
+    )
+    .max(100)
+    .optional()
+    .default([]),
   excludes: z
     .array(
       z
         .string()
         .min(1)
         .max(500)
-        .refine((s) => !s.includes('\0'), 'Pattern must not contain null bytes'),
+        .refine((s) => !s.includes('\0'), 'Pattern must not contain null bytes')
+        .refine((s) => !/^[+\-!]/.test(s), 'Pattern must not start with rclone filter prefixes (+, -, !)'),
     )
     .max(100)
     .optional()
     .default(['.git', '.DS_Store', '*.tmp']),
-  schedule: z.string().nullable().optional().default(null),
+  schedule: cronSchema.nullable().optional().default(null),
   encrypted: z.boolean().optional().default(false),
   /**
    * Per-project encryption password. Required when `encrypted` is true and
    * no global encryption password is configured on storage.
    * WARNING: Password loss = data loss. There is no key recovery mechanism.
    */
-  encryptionPassword: z.string().min(8).optional(),
+  encryptionPassword: z.string().min(12, 'Encryption password must be at least 12 characters').optional(),
   conflictStrategy: conflictStrategySchema.optional().default('newest-wins'),
   watch: z.boolean().optional().default(false),
   trigger: syncTriggerSchema.optional().default('manual'),
@@ -120,30 +182,42 @@ export const projectCreateSchema = z.object({
     .string()
     .regex(/^\d+(\.\d+)?[kKmMgG]?$/, 'Must be a valid rclone bandwidth limit (e.g., 1M, 500k)')
     .optional(),
+  softDelete: softDeleteConfigSchema.optional(),
 });
 
 export type ProjectCreate = z.infer<typeof projectCreateSchema>;
 
 export const projectUpdateSchema = z.object({
-  name: z.string().min(1).max(100).optional(),
+  name: projectNameSchema.optional(),
   localPath: localPathSchema.optional(),
   remotePath: remotePathSchema.optional(),
   direction: directionSchema.optional(),
-  includes: z.array(z.string()).optional(),
+  includes: z
+    .array(
+      z
+        .string()
+        .min(1)
+        .max(500)
+        .refine((s) => !s.includes('\0'), 'Pattern must not contain null bytes')
+        .refine((s) => !/^[+\-!]/.test(s), 'Pattern must not start with rclone filter prefixes (+, -, !)'),
+    )
+    .max(100)
+    .optional(),
   excludes: z
     .array(
       z
         .string()
         .min(1)
         .max(500)
-        .refine((s) => !s.includes('\0'), 'Pattern must not contain null bytes'),
+        .refine((s) => !s.includes('\0'), 'Pattern must not contain null bytes')
+        .refine((s) => !/^[+\-!]/.test(s), 'Pattern must not start with rclone filter prefixes (+, -, !)'),
     )
     .max(100)
     .optional(),
-  schedule: z.string().nullable().optional(),
+  schedule: cronSchema.nullable().optional(),
   encrypted: z.boolean().optional(),
-  /** Per-project encryption password. Min 8 chars when provided. */
-  encryptionPassword: z.string().min(8).optional(),
+  /** Per-project encryption password. Min 12 chars when provided. */
+  encryptionPassword: z.string().min(12, 'Encryption password must be at least 12 characters').optional(),
   conflictStrategy: conflictStrategySchema.optional(),
   watch: z.boolean().optional(),
   trigger: syncTriggerSchema.optional(),
@@ -152,6 +226,7 @@ export const projectUpdateSchema = z.object({
     .string()
     .regex(/^\d+(\.\d+)?[kKmMgG]?$/, 'Must be a valid rclone bandwidth limit (e.g., 1M, 500k)')
     .optional(),
+  softDelete: softDeleteConfigSchema.optional(),
 });
 
 export type ProjectUpdate = z.infer<typeof projectUpdateSchema>;
@@ -177,10 +252,14 @@ export interface Project {
   watchDebounceMs: number;
   /** Per-project bandwidth limit (e.g. "10M" for 10 MiB/s). */
   bandwidthLimit?: string;
+  /** Per-project soft delete configuration override. */
+  softDelete?: SoftDeleteConfig;
   status: ProjectStatus;
   lastSync: string | null;
   createdAt: string;
   updatedAt: string;
+  /** ISO timestamp when the project was soft-deleted, or null if active. */
+  deletedAt: string | null;
 }
 
 // ---------------------------------------------------------------------------
@@ -218,6 +297,8 @@ export interface ActiveOperation {
   eta: number;
   filesTransferred: number;
   filesTotal: number;
+  /** Direction override for this operation (when API caller specifies a different direction). */
+  direction?: Direction;
 }
 
 // ---------------------------------------------------------------------------
@@ -296,6 +377,8 @@ export interface ServerConfig {
   testResult: 'ok' | 'error' | null;
   /** SHA-256 hash of the API key used for standalone authentication. */
   apiKeyHash?: string;
+  /** Global soft delete configuration. */
+  softDelete?: SoftDeleteConfig;
 }
 
 /** Storage config as persisted — credentials are encrypted at rest */

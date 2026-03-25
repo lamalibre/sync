@@ -124,7 +124,7 @@ export const serverStartTool = {
       env: {
         ...process.env,
         SYNC_PORT: String(port),
-        NODE_ENV: 'development',
+        SYNC_SKIP_AUTH: '1',
       },
       detached: true,
       stdio: 'ignore',

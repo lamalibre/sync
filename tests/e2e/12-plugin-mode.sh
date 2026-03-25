@@ -2,9 +2,12 @@
 # ============================================================================
 # Test 12 — Plugin Mode
 # ============================================================================
-# Validates the Portlama plugin manifest, registration endpoint, and that
-# the server can operate in plugin mode. This test only needs the server
-# and validates the plugin integration surface.
+# Validates the Portlama plugin infrastructure: module exports, plugin mode
+# detection via environment variable, and that standalone mode is unaffected.
+#
+# Plugin mode is an integration pattern, not an HTTP API surface. Portlama
+# reads the manifest from the package and calls buildPlugin() programmatically.
+# There are no /api/sync/plugin/* HTTP endpoints.
 # ============================================================================
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
@@ -15,54 +18,72 @@ require_commands curl jq multipass
 begin_test "Plugin Mode"
 
 # ---------------------------------------------------------------------------
-log_section "Plugin manifest endpoint exists"
+log_section "Server exports plugin infrastructure"
 # ---------------------------------------------------------------------------
 
-MANIFEST_STATUS=$(api_get_status "plugin/manifest")
-assert_eq "$MANIFEST_STATUS" "200" "Plugin manifest endpoint returns 200"
+# Verify the sync-server package exports buildPlugin, isPluginMode, parsePluginManifest
+EXPORTS_CHECK=$(host_exec "cd /opt/sync/packages/sync-server && node --input-type=module -e \"
+  const m = await import('./dist/index.js');
+  const exports = ['buildPlugin', 'isPluginMode', 'parsePluginManifest'];
+  const found = exports.filter(e => typeof m[e] === 'function');
+  console.log(JSON.stringify({ found: found.length, expected: exports.length, missing: exports.filter(e => typeof m[e] !== 'function') }));
+\"" 2>/dev/null || echo '{"found":0,"expected":3}')
+
+FOUND=$(echo "$EXPORTS_CHECK" | jq -r '.found' 2>/dev/null || echo "0")
+EXPECTED=$(echo "$EXPORTS_CHECK" | jq -r '.expected' 2>/dev/null || echo "3")
+assert_eq "$FOUND" "$EXPECTED" "sync-server exports buildPlugin, isPluginMode, parsePluginManifest"
 
 # ---------------------------------------------------------------------------
-log_section "Plugin manifest structure is valid"
+log_section "isPluginMode returns false in standalone"
 # ---------------------------------------------------------------------------
 
-MANIFEST=$(api_get "plugin/manifest")
-
-assert_json_field_not_empty "$MANIFEST" '.name' "Manifest has a name"
-assert_json_field_not_empty "$MANIFEST" '.version' "Manifest has a version"
-assert_json_field_not_empty "$MANIFEST" '.description' "Manifest has a description"
-
-# Verify required manifest fields
-assert_json_field "$MANIFEST" '.name' "sync" "Plugin name is 'sync'"
-assert_json_field_not_empty "$MANIFEST" '.capabilities' "Manifest declares capabilities"
+STANDALONE_CHECK=$(host_exec "cd /opt/sync/packages/sync-server && node --input-type=module -e \"
+  const { isPluginMode } = await import('./dist/index.js');
+  console.log(isPluginMode() ? 'plugin' : 'standalone');
+\"" 2>/dev/null || echo "error")
+assert_eq "$STANDALONE_CHECK" "standalone" "isPluginMode() returns false in standalone mode"
 
 # ---------------------------------------------------------------------------
-log_section "Plugin capabilities include expected features"
+log_section "isPluginMode returns true with PORTLAMA_PLUGIN=1"
 # ---------------------------------------------------------------------------
 
-CAPS=$(echo "$MANIFEST" | jq -r '.capabilities // []' 2>/dev/null)
-assert_contains "$CAPS" "sync" "Plugin declares 'sync' capability"
+PLUGIN_CHECK=$(host_exec "cd /opt/sync/packages/sync-server && PORTLAMA_PLUGIN=1 node --input-type=module -e \"
+  const { isPluginMode } = await import('./dist/index.js');
+  console.log(isPluginMode() ? 'plugin' : 'standalone');
+\"" 2>/dev/null || echo "error")
+assert_eq "$PLUGIN_CHECK" "plugin" "isPluginMode() returns true when PORTLAMA_PLUGIN=1"
 
 # ---------------------------------------------------------------------------
-log_section "Plugin registration endpoint"
+log_section "parsePluginManifest validates structure"
 # ---------------------------------------------------------------------------
 
-# The plugin registration endpoint should accept a Portlama panel connection
-REGISTER_STATUS=$(api_post_status "plugin/register" '{"panelUrl": "https://test.portlama.local", "token": "test-token"}')
-# In development mode, this should be accepted (or return a sensible status)
-# We just verify the endpoint exists and doesn't 404
-assert_not_eq "$REGISTER_STATUS" "404" "Plugin registration endpoint exists"
+MANIFEST_CHECK=$(host_exec "cd /opt/sync/packages/sync-server && node --input-type=module -e \"
+  const { parsePluginManifest } = await import('./dist/index.js');
+  try {
+    parsePluginManifest({ name: 'sync', version: '1.0.0', roles: { host: {}, agent: {} } });
+    console.log('valid');
+  } catch (e) {
+    console.log('invalid: ' + e.message);
+  }
+\"" 2>/dev/null || echo "error")
+assert_eq "$MANIFEST_CHECK" "valid" "parsePluginManifest accepts valid manifest"
+
+MANIFEST_REJECT=$(host_exec "cd /opt/sync/packages/sync-server && node --input-type=module -e \"
+  const { parsePluginManifest } = await import('./dist/index.js');
+  try {
+    parsePluginManifest(null);
+    console.log('valid');
+  } catch (e) {
+    console.log('rejected');
+  }
+\"" 2>/dev/null || echo "error")
+assert_eq "$MANIFEST_REJECT" "rejected" "parsePluginManifest rejects null input"
 
 # ---------------------------------------------------------------------------
-log_section "Plugin status endpoint"
+log_section "Server health still works (standalone unaffected)"
 # ---------------------------------------------------------------------------
 
-PLUGIN_STATUS=$(api_get "plugin/status")
-assert_json_field_not_empty "$PLUGIN_STATUS" '.mode' "Plugin status has mode field"
-
-MODE=$(echo "$PLUGIN_STATUS" | jq -r '.mode' 2>/dev/null || echo "")
-log_info "Server mode: $MODE"
-
-# In development mode without Portlama connection, mode should be "standalone"
-assert_eq "$MODE" "standalone" "Server running in standalone mode"
+HEALTH_STATUS=$(api_get_status "health")
+assert_eq "$HEALTH_STATUS" "200" "Health endpoint returns 200 in standalone mode"
 
 end_test

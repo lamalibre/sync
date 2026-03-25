@@ -20,8 +20,9 @@ import {
 } from '@lamalibre/sync-shared';
 import { createProgressParser } from './progress-parser.js';
 import { buildExcludeFlags, buildBandwidthFlags } from './rclone-runner.js';
+import { buildRemoteTrashPath } from './trash-paths.js';
 import { scanDirectory, buildStubData, writeStub, readStub, STUB_FILENAME } from './stub.js';
-import type { SyncProgress } from './types.js';
+import type { SyncProgress, SoftDeleteConfig } from './types.js';
 import type { StubData } from './stub.js';
 
 // ---------------------------------------------------------------------------
@@ -39,6 +40,7 @@ export interface ArchiveOptions {
   readonly provider: string;
   readonly excludes: readonly string[];
   readonly bandwidthLimit?: string;
+  readonly softDelete?: SoftDeleteConfig;
   readonly onProgress?: (progress: SyncProgress) => void;
 }
 
@@ -121,6 +123,10 @@ export async function runArchive(
       '--exclude',
       STUB_FILENAME,
       ...buildBandwidthFlags(options.bandwidthLimit),
+      // When soft delete is enabled, overwritten remote files go to trash
+      ...(options.softDelete?.enabled
+        ? ['--backup-dir', buildRemoteTrashPath(options.remoteName, options.bucket, options.projectId)]
+        : []),
     ];
 
     archiveLogger.info({ remote }, 'Starting rclone move');
@@ -163,7 +169,7 @@ export async function runArchive(
 
     const stubPath = await writeStub(options.localPath, stubData);
     const stubStat = await stat(stubPath);
-    const spaceFreed = scan.totalSize - stubStat.size;
+    const spaceFreed = Math.max(0, scan.totalSize - stubStat.size);
 
     archiveLogger.info({ spaceFreed, stubPath }, 'Stub written, archive complete');
 
@@ -288,6 +294,11 @@ export async function runRestore(
         `Stub remotePath mismatch: expected ${options.expectedRemotePath}, got ${stub.remotePath}`,
       );
     }
+    if (stub.projectId !== options.projectId) {
+      throw new Error(
+        `Stub projectId mismatch: expected ${options.projectId}, got ${stub.projectId}`,
+      );
+    }
 
     restoreLogger.info(
       {
@@ -391,7 +402,7 @@ export async function runRestore(
 
     // 4. Remove the stub file (full restore only)
     if (!options.singleFilePath) {
-      const stubPath = `${options.localPath}/${STUB_FILENAME}`;
+      const stubPath = join(options.localPath, STUB_FILENAME);
       try {
         await unlink(stubPath);
         restoreLogger.info('Stub file removed');

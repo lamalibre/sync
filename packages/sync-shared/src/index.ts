@@ -8,12 +8,14 @@ export {
   CONFLICT_STRATEGIES,
   SYNC_TRIGGERS,
   PROJECT_STATUSES,
+  DEFAULT_SOFT_DELETE_CONFIG,
   isNodeError,
   type ProviderType,
   type SyncDirection,
   type ConflictStrategy,
   type SyncTrigger,
   type ProjectStatus,
+  type SoftDeleteConfig,
 } from './types.js';
 
 export {

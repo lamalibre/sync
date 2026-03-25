@@ -17,6 +17,10 @@ import {
   DEFAULT_LOW_LEVEL_RETRIES,
 } from '@lamalibre/sync-shared';
 import { createProgressParser } from './progress-parser.js';
+import {
+  buildRemoteTrashPath,
+  buildLocalTrashPath,
+} from './trash-paths.js';
 import type {
   RcloneSyncOptions,
   RcloneBisyncOptions,
@@ -30,9 +34,15 @@ import type {
  * Build the exclude flags array from exclude patterns.
  * Each pattern becomes a separate --exclude argument.
  */
-export function buildExcludeFlags(excludes: readonly string[]): string[] {
+export function buildExcludeFlags(excludes: readonly string[], logger?: Logger): string[] {
   const flags: string[] = [];
   for (const pattern of excludes) {
+    // Defense in depth: reject patterns with null bytes or rclone filter prefixes
+    // even though the server validates these — the agent may receive config from cache.
+    if (pattern.includes('\0') || /^[+\-!]/.test(pattern)) {
+      logger?.warn({ pattern }, 'Skipping unsafe exclude pattern');
+      continue;
+    }
     flags.push('--exclude', pattern);
   }
   return flags;
@@ -47,6 +57,48 @@ export function buildBandwidthFlags(bandwidthLimit?: string): string[] {
     return [];
   }
   return ['--bwlimit', bandwidthLimit];
+}
+
+/**
+ * Build --backup-dir flags for push/pull sync.
+ * Push: overwritten remote files go to remote trash.
+ * Pull: overwritten local files go to local trash.
+ */
+export function buildBackupDirFlags(
+  options: RcloneSyncOptions,
+  agentDir: string,
+): string[] {
+  if (!options.softDelete?.enabled) return [];
+
+  if (options.direction === 'push') {
+    return [
+      '--backup-dir',
+      buildRemoteTrashPath(options.remoteName, options.bucket, options.projectId),
+    ];
+  }
+  // pull
+  return [
+    '--backup-dir',
+    buildLocalTrashPath(agentDir, options.projectId),
+  ];
+}
+
+/**
+ * Build --backup-dir1/--backup-dir2 flags for bisync.
+ * Local overwritten files go to local trash, remote to remote trash.
+ */
+export function buildBisyncBackupDirFlags(
+  options: RcloneBisyncOptions,
+  agentDir: string,
+): string[] {
+  if (!options.softDelete?.enabled) return [];
+
+  return [
+    '--backup-dir1',
+    buildLocalTrashPath(agentDir, options.projectId),
+    '--backup-dir2',
+    buildRemoteTrashPath(options.remoteName, options.bucket, options.projectId),
+  ];
 }
 
 /**
@@ -78,6 +130,7 @@ export async function runRcloneSync(
   options: RcloneSyncOptions,
   logger: Logger,
   abortSignal?: AbortSignal,
+  agentDir?: string,
 ): Promise<SyncResult> {
   const startTime = Date.now();
   const syncLogger = logger.child({
@@ -109,6 +162,7 @@ export async function runRcloneSync(
     DEFAULT_LOW_LEVEL_RETRIES,
     ...buildExcludeFlags(options.excludes),
     ...buildBandwidthFlags(options.bandwidthLimit),
+    ...(agentDir ? buildBackupDirFlags(options, agentDir) : []),
   ];
 
   syncLogger.info({ source, destination }, 'Starting rclone sync');
@@ -299,6 +353,7 @@ export async function runRcloneBisync(
   options: RcloneBisyncOptions,
   logger: Logger,
   abortSignal?: AbortSignal,
+  agentDir?: string,
 ): Promise<SyncResult> {
   const startTime = Date.now();
   const syncLogger = logger.child({
@@ -324,6 +379,7 @@ export async function runRcloneBisync(
     ...buildExcludeFlags(options.excludes),
     ...buildBandwidthFlags(options.bandwidthLimit),
     ...buildConflictFlags(options.conflictStrategy),
+    ...(agentDir ? buildBisyncBackupDirFlags(options, agentDir) : []),
   ];
 
   // First run requires --resync to establish baseline

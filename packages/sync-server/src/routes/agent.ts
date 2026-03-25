@@ -3,14 +3,18 @@ import type { ZodTypeProvider } from 'fastify-type-provider-zod';
 import { agentReportSchema } from '../lib/schemas.js';
 import type { SyncOperation, StorageConfig } from '../lib/schemas.js';
 import { decrypt } from '../lib/crypto.js';
+import { DEFAULT_SOFT_DELETE_CONFIG } from '@lamalibre/sync-shared';
+import type { SoftDeleteConfig } from '@lamalibre/sync-shared';
 import {
   loadConfig,
-  loadProjects,
+  loadActiveProjects,
   decryptStorageConfig,
+  addHistoryEntry,
   updateHistoryEntry,
   clearActiveOperation,
   updateProjectStatus,
   getProject,
+  getActiveOperation,
   upsertSavings,
   clearSavings,
   NotFoundError,
@@ -75,7 +79,8 @@ export async function agentRoutes(app: FastifyInstance): Promise<void> {
     }
 
     const decrypted = await decryptStorageConfig(config.storage);
-    const projects = await loadProjects();
+    // Only serve active (non-deleted) projects to the agent
+    const projects = await loadActiveProjects();
 
     // Include encryptionPassword only when at least one project uses encryption.
     // The password is needed by the agent to generate the rclone crypt remote.
@@ -100,6 +105,14 @@ export async function agentRoutes(app: FastifyInstance): Promise<void> {
           }
         }
 
+        // Resolve effective soft delete config: project override ?? global ?? default
+        const effectiveSoftDelete: SoftDeleteConfig =
+          p.softDelete ?? config.softDelete ?? DEFAULT_SOFT_DELETE_CONFIG;
+
+        // Include pendingOperationId when there's an active server-initiated operation
+        // so the agent uses the same ID and the report updates the correct history entry.
+        const activeOp = getActiveOperation(p.id);
+
         return {
           id: p.id,
           name: p.name,
@@ -118,6 +131,14 @@ export async function agentRoutes(app: FastifyInstance): Promise<void> {
           trigger: p.trigger,
           watchDebounceMs: p.watchDebounceMs,
           ...(p.bandwidthLimit ? { bandwidthLimit: p.bandwidthLimit } : {}),
+          softDelete: effectiveSoftDelete,
+          ...(activeOp
+            ? {
+                pendingOperationId: activeOp.operationId,
+                pendingType: activeOp.type,
+                ...(activeOp.direction ? { pendingDirection: activeOp.direction } : {}),
+              }
+            : {}),
         };
       }),
     );
@@ -128,6 +149,7 @@ export async function agentRoutes(app: FastifyInstance): Promise<void> {
     return reply.send({
       provider: providerConfig,
       projects: mappedProjects,
+      softDelete: config.softDelete ?? DEFAULT_SOFT_DELETE_CONFIG,
     });
   });
 
@@ -142,9 +164,10 @@ export async function agentRoutes(app: FastifyInstance): Promise<void> {
     async (request, reply) => {
       const report = request.body;
 
-      // Verify project exists
+      // Verify project exists (include soft-deleted — an in-flight sync may complete after deletion)
+      let project;
       try {
-        await getProject(report.projectId);
+        project = await getProject(report.projectId, true);
       } catch (err: unknown) {
         if (err instanceof NotFoundError) {
           return reply.status(404).send({ ok: false, error: err.message });
@@ -166,7 +189,30 @@ export async function agentRoutes(app: FastifyInstance): Promise<void> {
         ...(report.trigger ? { trigger: report.trigger } : {}),
       };
 
-      await updateHistoryEntry(report.operationId, historyUpdate);
+      const updated = await updateHistoryEntry(report.operationId, historyUpdate);
+
+      // If no matching history entry exists (agent-initiated sync via watch/schedule),
+      // create a complete history entry so all syncs are recorded.
+      if (!updated) {
+        const newEntry: SyncOperation = {
+          id: report.operationId,
+          projectId: report.projectId,
+          type: (report.type as SyncOperation['type']) ?? 'sync',
+          direction: report.direction ?? project.direction,
+          trigger: report.trigger ?? 'manual',
+          status: report.status === 'completed' ? 'completed' : 'error',
+          startedAt: report.duration
+            ? new Date(Date.now() - report.duration).toISOString()
+            : now,
+          completedAt: now,
+          duration: report.duration,
+          bytesTransferred: report.bytesTransferred,
+          filesTransferred: report.filesTransferred,
+          errors: report.errors ?? 0,
+          errorMessage: report.errorMessage ?? null,
+        };
+        await addHistoryEntry(newEntry);
+      }
 
       // Clear active operation
       clearActiveOperation(report.projectId);

@@ -135,7 +135,7 @@ pnpm dev:server            # Start standalone sync server (port 9393)
 | `SYNC_HOST` | sync-server | Listen address (default: 127.0.0.1) |
 | `SYNC_DATA_DIR` | sync-server | State directory (default: ~/.sync/) |
 | `SYNC_CONFIG` | sync-server | Path to config file |
-| `NODE_ENV` | sync-server | `development` skips auth checks |
+| `SYNC_SKIP_AUTH` | sync-server | Set to `1` to skip auth (loopback only) |
 
 ## License
 

@@ -1,6 +1,7 @@
 import type { FastifyInstance } from 'fastify';
 import type { ZodTypeProvider } from 'fastify-type-provider-zod';
 import { z } from 'zod';
+import { projectIdSchema } from '../lib/schemas.js';
 import type { SyncOperation, ActiveOperation } from '../lib/schemas.js';
 import {
   getProject,
@@ -8,6 +9,7 @@ import {
   setActiveOperation,
   loadConfig,
   addHistoryEntry,
+  updateProjectStatus,
   getProjectSavings,
   getAggregateSavings,
   loadSavings,
@@ -25,22 +27,30 @@ export async function archiveRoutes(app: FastifyInstance): Promise<void> {
     {
       schema: {
         params: z.object({
-          projectId: z.string().min(1),
+          projectId: projectIdSchema,
         }),
       },
     },
     async (request, reply) => {
       const { projectId } = request.params;
 
-      // Verify project exists
+      // Verify project exists (include soft-deleted for informative error)
       let project;
       try {
-        project = await getProject(projectId);
+        project = await getProject(projectId, true);
       } catch (err: unknown) {
         if (err instanceof NotFoundError) {
           return reply.status(404).send({ ok: false, error: err.message });
         }
         throw err;
+      }
+
+      // Reject if project is soft-deleted
+      if (project.deletedAt) {
+        return reply.status(400).send({
+          ok: false,
+          error: `Project "${projectId}" is deleted. Restore it before archiving.`,
+        });
       }
 
       // Reject if already archived
@@ -106,6 +116,9 @@ export async function archiveRoutes(app: FastifyInstance): Promise<void> {
       };
       await addHistoryEntry(historyEntry);
 
+      // Update project status so the agent detects the pending operation
+      await updateProjectStatus(projectId, 'syncing').catch(() => {});
+
       request.log.info({ operationId, projectId }, 'Archive triggered');
 
       return reply.send({
@@ -124,7 +137,7 @@ export async function archiveRoutes(app: FastifyInstance): Promise<void> {
     {
       schema: {
         params: z.object({
-          projectId: z.string().min(1),
+          projectId: projectIdSchema,
         }),
         body: z
           .object({
@@ -135,8 +148,8 @@ export async function archiveRoutes(app: FastifyInstance): Promise<void> {
               .refine((p) => !p.includes('\0') && !p.split('/').includes('..'), {
                 message: 'Invalid file path',
               })
-              .refine((p) => !/[*?[{]/.test(p), {
-                message: 'File path must not contain glob metacharacters (*, ?, [, {)',
+              .refine((p) => !/[*?[{\]\\}]/.test(p), {
+                message: 'File path must not contain glob metacharacters (*, ?, [, ], {, }, \\)',
               })
               .optional(),
           })
@@ -147,15 +160,23 @@ export async function archiveRoutes(app: FastifyInstance): Promise<void> {
       const { projectId } = request.params;
       const filePath = request.body?.filePath;
 
-      // Verify project exists
+      // Verify project exists (include soft-deleted for informative error)
       let project;
       try {
-        project = await getProject(projectId);
+        project = await getProject(projectId, true);
       } catch (err: unknown) {
         if (err instanceof NotFoundError) {
           return reply.status(404).send({ ok: false, error: err.message });
         }
         throw err;
+      }
+
+      // Reject if project is soft-deleted
+      if (project.deletedAt) {
+        return reply.status(400).send({
+          ok: false,
+          error: `Project "${projectId}" is deleted. Restore it before recovering files.`,
+        });
       }
 
       // Full restore requires archived status; single-file doesn't necessarily
@@ -220,6 +241,9 @@ export async function archiveRoutes(app: FastifyInstance): Promise<void> {
       };
       await addHistoryEntry(historyEntry);
 
+      // Update project status so the agent detects the pending operation
+      await updateProjectStatus(projectId, 'syncing').catch(() => {});
+
       request.log.info(
         { operationId, projectId, filePath: filePath ?? 'all' },
         'Restore triggered',
@@ -241,7 +265,7 @@ export async function archiveRoutes(app: FastifyInstance): Promise<void> {
     {
       schema: {
         params: z.object({
-          projectId: z.string().min(1),
+          projectId: projectIdSchema,
         }),
       },
     },
@@ -288,7 +312,7 @@ export async function archiveRoutes(app: FastifyInstance): Promise<void> {
     {
       schema: {
         params: z.object({
-          projectId: z.string().min(1),
+          projectId: projectIdSchema,
         }),
       },
     },

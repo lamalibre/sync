@@ -37,6 +37,7 @@ import {
   buildCryptRemoteMap,
 } from './lib/rclone-config.js';
 import { runRcloneSync, runRcloneBisync, generateOperationId } from './lib/rclone-runner.js';
+import { cleanupProjectTrash } from './lib/trash-cleanup.js';
 import { runArchive, runRestore, type ArchiveResult, type RestoreResult } from './lib/archive.js';
 import { readStub } from './lib/stub.js';
 import { getBisyncState, updateBisyncState } from './lib/bisync-state.js';
@@ -94,6 +95,9 @@ export class Agent {
    * when the trigger fired. Maps project ID to the trigger type.
    */
   private readonly pendingSyncs = new Map<string, 'watch' | 'schedule'>();
+
+  /** Timer for periodic trash cleanup. */
+  private trashCleanupTimer: ReturnType<typeof setInterval> | null = null;
 
   constructor(options: AgentOptions) {
     this.agentDir = options.agentDir;
@@ -223,6 +227,12 @@ export class Agent {
       this.heartbeatTimer = null;
     }
 
+    // Stop trash cleanup timer
+    if (this.trashCleanupTimer) {
+      clearInterval(this.trashCleanupTimer);
+      this.trashCleanupTimer = null;
+    }
+
     // Stop all file watchers
     await this.stopAllWatchers();
 
@@ -302,6 +312,7 @@ export class Agent {
     projectId: string,
     direction?: SyncDirection,
     trigger: 'manual' | 'watch' | 'schedule' = 'manual',
+    pendingOperationId?: string,
   ): Promise<string | null> {
     if (!this.currentConfig) {
       this.logger.warn('Cannot trigger sync: no config loaded');
@@ -325,7 +336,7 @@ export class Agent {
       return null;
     }
 
-    const operationId = generateOperationId();
+    const operationId = pendingOperationId ?? generateOperationId();
     const syncDirection = direction ?? project.direction;
 
     const abortController = new AbortController();
@@ -363,6 +374,7 @@ export class Agent {
           bandwidthLimit,
           resync: false, // Will be overridden by executeBisyncOperation based on state
           conflictStrategy: project.conflictStrategy ?? 'newest-wins',
+          softDelete: project.softDelete,
           onProgress: (progress) => {
             this.logger.debug(
               { projectId, operationId, percentage: progress.percentage },
@@ -387,6 +399,7 @@ export class Agent {
           bucket: this.currentConfig.provider.bucket,
           excludes: project.excludes,
           bandwidthLimit,
+          softDelete: project.softDelete,
           onProgress: (progress) => {
             this.logger.debug(
               { projectId, operationId, percentage: progress.percentage },
@@ -406,7 +419,7 @@ export class Agent {
    * Archive a project: move files to remote, write stub.
    * Returns the operation ID, or null if an operation is already in progress.
    */
-  async triggerArchive(projectId: string): Promise<string | null> {
+  async triggerArchive(projectId: string, pendingOperationId?: string): Promise<string | null> {
     if (!this.currentConfig) {
       this.logger.warn('Cannot trigger archive: no config loaded');
       return null;
@@ -428,7 +441,7 @@ export class Agent {
       return null;
     }
 
-    const operationId = generateOperationId();
+    const operationId = pendingOperationId ?? generateOperationId();
     const abortController = new AbortController();
     const activeSync: ActiveSync = {
       operationId,
@@ -460,6 +473,7 @@ export class Agent {
         provider: this.currentConfig.provider.type,
         excludes: project.excludes,
         bandwidthLimit,
+        softDelete: project.softDelete,
         onProgress: (progress) => {
           this.logger.debug(
             { projectId, operationId, percentage: progress.percentage },
@@ -478,7 +492,7 @@ export class Agent {
    * Returns the operation ID, or null if an operation is already in progress.
    * Pass singleFilePath to restore only one file.
    */
-  async triggerRestore(projectId: string, singleFilePath?: string): Promise<string | null> {
+  async triggerRestore(projectId: string, pendingOperationId?: string, singleFilePath?: string): Promise<string | null> {
     if (!this.currentConfig) {
       this.logger.warn('Cannot trigger restore: no config loaded');
       return null;
@@ -500,8 +514,8 @@ export class Agent {
       if (singleFilePath.includes('\0') || singleFilePath.split('/').includes('..')) {
         throw new Error('Invalid file path for restore');
       }
-      if (/[*?[{]/.test(singleFilePath)) {
-        throw new Error('File path must not contain glob metacharacters (*, ?, [, {)');
+      if (/[*?[{\]\\}]/.test(singleFilePath)) {
+        throw new Error('File path must not contain glob metacharacters (*, ?, [, ], {, }, \\)');
       }
     }
 
@@ -512,7 +526,7 @@ export class Agent {
       return null;
     }
 
-    const operationId = generateOperationId();
+    const operationId = pendingOperationId ?? generateOperationId();
     const abortController = new AbortController();
     const activeSync: ActiveSync = {
       operationId,
@@ -724,6 +738,28 @@ export class Agent {
     // Reconcile cron schedules with new project list
     this.reconcileSchedules(config.projects);
 
+    // Reconcile trash cleanup with new config
+    this.reconcileTrashCleanup(config);
+
+    // Detect server-initiated operations: projects with status "syncing"
+    // that the agent isn't already running an operation for.
+    for (const project of config.projects) {
+      if (project.status === 'syncing' && !this.activeSyncs.has(project.id)) {
+        const opType = project.pendingType ?? 'sync';
+        this.logger.info(
+          { projectId: project.id, pendingOperationId: project.pendingOperationId, pendingDirection: project.pendingDirection, pendingType: opType },
+          'Detected server-initiated operation, triggering',
+        );
+        if (opType === 'archive') {
+          void this.triggerArchive(project.id, project.pendingOperationId);
+        } else if (opType === 'restore') {
+          void this.triggerRestore(project.id, project.pendingOperationId);
+        } else {
+          void this.triggerSync(project.id, project.pendingDirection, 'manual', project.pendingOperationId);
+        }
+      }
+    }
+
     this.logger.info({ projectCount: config.projects.length }, 'Config applied successfully');
   }
 
@@ -838,6 +874,78 @@ export class Agent {
   }
 
   // ---------------------------------------------------------------------------
+  // Private: Trash cleanup management
+  // ---------------------------------------------------------------------------
+
+  /**
+   * Reconcile the trash cleanup timer based on the current config.
+   * Runs every hour to check and clean expired trash directories.
+   */
+  private reconcileTrashCleanup(config: AgentConfig): void {
+    // Stop existing timer
+    if (this.trashCleanupTimer) {
+      clearInterval(this.trashCleanupTimer);
+      this.trashCleanupTimer = null;
+    }
+
+    // Start cleanup if global or any per-project soft delete is enabled
+    const globalSoftDelete = config.softDelete;
+    const anyProjectEnabled = config.projects.some((p) => p.softDelete?.enabled);
+    if (!globalSoftDelete?.enabled && !anyProjectEnabled) return;
+
+    // Run trash cleanup every hour (the cron schedule is informational;
+    // we use a simple interval for the agent-side cleanup)
+    const CLEANUP_INTERVAL_MS = 3_600_000; // 1 hour
+
+    this.trashCleanupTimer = setInterval(() => {
+      void this.runTrashCleanup();
+    }, CLEANUP_INTERVAL_MS);
+
+    this.logger.info(
+      { retentionDays: globalSoftDelete?.retentionDays ?? 'per-project' },
+      'Trash cleanup timer started (every 1h)',
+    );
+  }
+
+  /**
+   * Run trash cleanup for all projects.
+   */
+  private async runTrashCleanup(): Promise<void> {
+    if (!this.currentConfig) return;
+
+    for (const project of this.currentConfig.projects) {
+      const softDelete = project.softDelete ?? this.currentConfig.softDelete;
+      if (!softDelete?.enabled) continue;
+
+      try {
+        await cleanupProjectTrash(
+          {
+            projectId: project.id,
+            agentDir: this.agentDir,
+            rcloneConfigPath: getRcloneConfigPath(this.agentDir),
+            remoteName: getProjectRemoteName(
+              project,
+              this.currentConfig.provider,
+              this.cryptRemoteMap,
+            ),
+            bucket: this.currentConfig.provider.bucket,
+            retentionDays: softDelete.retentionDays,
+          },
+          this.logger,
+        );
+      } catch (err: unknown) {
+        this.logger.warn(
+          {
+            err: err instanceof Error ? err.message : String(err),
+            projectId: project.id,
+          },
+          'Trash cleanup failed for project',
+        );
+      }
+    }
+  }
+
+  // ---------------------------------------------------------------------------
   // Private: Schedule management
   // ---------------------------------------------------------------------------
 
@@ -882,10 +990,6 @@ export class Agent {
     // Explicit schedule or combined trigger
     if (trigger === 'schedule' || trigger === 'watch+schedule') return true;
 
-    // Legacy: if schedule is set and no explicit trigger mode, schedule it
-    // (unless trigger is explicitly "watch" or "manual")
-    if (!trigger) return true;
-
     return false;
   }
 
@@ -920,7 +1024,7 @@ export class Agent {
     let result: SyncResult;
 
     try {
-      result = await runRcloneSync(options, this.logger, abortSignal);
+      result = await runRcloneSync(options, this.logger, abortSignal, this.agentDir);
     } catch (error: unknown) {
       result = {
         operationId: options.operationId,
@@ -966,7 +1070,7 @@ export class Agent {
     let result: SyncResult;
 
     try {
-      result = await runRcloneBisync(effectiveOptions, this.logger, abortSignal);
+      result = await runRcloneBisync(effectiveOptions, this.logger, abortSignal, this.agentDir);
     } catch (error: unknown) {
       result = {
         operationId: options.operationId,

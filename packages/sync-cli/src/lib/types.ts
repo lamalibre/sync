@@ -20,4 +20,5 @@ export interface Project {
   trigger: string;
   status: string;
   lastSync: string | null;
+  deletedAt: string | null;
 }

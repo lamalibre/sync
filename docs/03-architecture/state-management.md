@@ -30,7 +30,8 @@ Storage provider configuration with encrypted credentials.
   },
   "lastTested": "2026-03-24T10:00:00.000Z",
   "testResult": "ok",
-  "apiKeyHash": "sha256hex..."
+  "apiKeyHash": "sha256hex...",
+  "softDelete": { "enabled": true, "retentionDays": 90, "cleanupSchedule": "0 3 * * *" }
 }
 ```
 
@@ -49,7 +50,7 @@ Project definitions.
       "id": "training-data",
       "name": "training-data",
       "localPath": "/home/user/data/training",
-      "remotePath": "training-data",
+      "remotePath": "projects/training-data",
       "direction": "bidirectional",
       "includes": [],
       "excludes": [".DS_Store", "*.tmp", "__pycache__"],
@@ -61,6 +62,8 @@ Project definitions.
       "trigger": "watch+schedule",
       "watchDebounceMs": 5000,
       "bandwidthLimit": "10M",
+      "softDelete": { "enabled": true, "retentionDays": 90, "cleanupSchedule": "0 3 * * *" },
+      "deletedAt": null,
       "status": "synced",
       "lastSync": "2026-03-24T10:30:00.000Z",
       "createdAt": "2026-03-20T09:00:00.000Z",
@@ -71,6 +74,7 @@ Project definitions.
 ```
 
 - **Status values:** `synced`, `syncing`, `local-only`, `cloud-only`, `archived`, `error`
+- **Soft delete:** Projects have a `deletedAt` field (ISO timestamp or `null`). Soft-deleted projects are filtered from normal queries but remain in the file. Hard delete splices them from the array.
 - **Encryption passwords:** Stored encrypted (same scheme as storage credentials)
 
 ### `sync-history.json`

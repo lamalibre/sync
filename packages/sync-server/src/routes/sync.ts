@@ -10,6 +10,7 @@ import {
   updateProjectStatus,
   NotFoundError,
 } from '../lib/state.js';
+import { projectIdSchema, directionSchema } from '../lib/schemas.js';
 import type { SyncOperation, ActiveOperation } from '../lib/schemas.js';
 
 export async function syncRoutes(app: FastifyInstance): Promise<void> {
@@ -21,22 +22,37 @@ export async function syncRoutes(app: FastifyInstance): Promise<void> {
     {
       schema: {
         params: z.object({
-          projectId: z.string().min(1),
+          projectId: projectIdSchema,
         }),
+        body: z
+          .object({
+            direction: directionSchema.optional(),
+          })
+          .optional()
+          .default({}),
       },
     },
     async (request, reply) => {
       const { projectId } = request.params;
+      const { direction: requestedDirection } = request.body;
 
-      // Verify project exists
+      // Verify project exists (include soft-deleted for informative error)
       let project;
       try {
-        project = await getProject(projectId);
+        project = await getProject(projectId, true);
       } catch (err: unknown) {
         if (err instanceof NotFoundError) {
           return reply.status(404).send({ ok: false, error: err.message });
         }
         throw err;
+      }
+
+      // Reject if project is soft-deleted
+      if (project.deletedAt) {
+        return reply.status(400).send({
+          ok: false,
+          error: `Project "${projectId}" is deleted. Restore it before syncing.`,
+        });
       }
 
       // Check storage is configured
@@ -58,6 +74,9 @@ export async function syncRoutes(app: FastifyInstance): Promise<void> {
         });
       }
 
+      // Use requested direction if provided, else fall back to project's configured direction
+      const effectiveDirection = requestedDirection ?? project.direction;
+
       // Create operation
       const operationId = crypto.randomUUID();
       const now = new Date().toISOString();
@@ -73,6 +92,7 @@ export async function syncRoutes(app: FastifyInstance): Promise<void> {
         eta: 0,
         filesTransferred: 0,
         filesTotal: 0,
+        direction: effectiveDirection,
       };
       setActiveOperation(activeOp);
 
@@ -81,7 +101,7 @@ export async function syncRoutes(app: FastifyInstance): Promise<void> {
         id: operationId,
         projectId,
         type: 'sync',
-        direction: project.direction,
+        direction: effectiveDirection,
         trigger: 'manual',
         status: 'running',
         startedAt: now,
@@ -99,7 +119,7 @@ export async function syncRoutes(app: FastifyInstance): Promise<void> {
         // best-effort status update
       });
 
-      request.log.info({ operationId, projectId, direction: project.direction }, 'Sync triggered');
+      request.log.info({ operationId, projectId, direction: effectiveDirection }, 'Sync triggered');
 
       return reply.send({
         ok: true,

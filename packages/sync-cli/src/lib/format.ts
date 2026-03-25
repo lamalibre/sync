@@ -55,6 +55,8 @@ export function colorStatus(status: string): string {
       return pc.magenta(status);
     case 'error':
       return pc.red(status);
+    case 'deleted':
+      return pc.dim(pc.strikethrough(status));
     case 'completed':
       return pc.green(status);
     case 'running':

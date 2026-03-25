@@ -32,8 +32,12 @@
 | **rclone** | External binary for syncing files with 40+ cloud providers. Sync's sole file transfer engine. |
 | **rclone crypt** | rclone's client-side encryption using NaCl SecretBox (XSalsa20 + Poly1305) for content and EME for filenames. |
 | **Restore** | Downloading archived files from cloud storage via `rclone copy` and removing the metadata stub. The cloud copy is preserved. |
+| **Soft delete** | Marking a project as deleted (`deletedAt` timestamp) without removing it from storage. The project is hidden from normal queries but can be restored. Hard delete permanently removes it. |
+| **Soft delete config** | Per-project or global configuration controlling soft delete behavior: `enabled` (boolean), `retentionDays` (1-3650, default 90), and `cleanupSchedule` (cron expression, default `0 3 * * *`). |
 | **Standalone mode** | Deployment where Sync runs its own server with its own API key and encryption. Does not require Portlama. |
 | **Stub** | A small JSON file (`.sync-stub.json`) left in a local directory after archiving. Contains metadata about the archived files (count, size, cloud location). |
+| **Sync trash** | Backup directory (`.sync-trash/`) where files overwritten or deleted during sync are kept. Uses rclone's `--backup-dir` flag. Organized by project and timestamp. Automatically cleaned up based on retention policy (default 90 days). |
+| **Trash restore** | Copying files from a timestamped trash directory back to the project's local path. Initiated via `POST /api/sync/projects/:id/restore-trash` or the `trash-restore` CLI command. |
 | **Sync trigger** | What initiates a sync operation: `manual` (API/CLI), `watch` (file changes), `schedule` (cron), or `watch+schedule` (both). |
 
 ## Related Documentation

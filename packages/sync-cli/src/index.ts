@@ -11,6 +11,11 @@ import { restoreCommand } from './commands/restore.js';
 import { configCommand } from './commands/config.js';
 import { projectsCommand } from './commands/projects.js';
 import { uninstallCommand } from './commands/uninstall.js';
+import { trashListCommand } from './commands/trash-list.js';
+import { trashPurgeCommand } from './commands/trash-purge.js';
+import { projectDeleteCommand } from './commands/project-delete.js';
+import { projectRestoreCommand } from './commands/project-restore.js';
+import { trashRestoreCommand } from './commands/trash-restore.js';
 
 export const PACKAGE_NAME = '@lamalibre/sync-cli';
 
@@ -66,14 +71,19 @@ ${pc.bold('Usage:')}
   sync <command> [options]
 
 ${pc.bold('Commands:')}
-  status              Show all projects and their sync status
-  trigger [project]   Trigger sync for a project
-  archive [project]   Archive project files to cloud storage
-  restore [project]   Restore archived files from cloud storage
-  config              Show current configuration
-  projects            List projects (interactive detail selection)
-  uninstall           Remove agent, config, and service
-  help                Show this help message
+  status                Show all projects and their sync status
+  trigger [project]     Trigger sync for a project
+  archive [project]     Archive project files to cloud storage
+  restore [project]     Restore archived files from cloud storage
+  config                Show current configuration
+  projects              List projects (interactive detail selection)
+  project-delete [id]   Delete a project (soft delete by default)
+  project-restore [id]  Restore a soft-deleted project
+  trash-list [project]  List trash entries for a project
+  trash-purge [project] Purge trash for a project
+  trash-restore [project] [timestamp] Restore files from trash
+  uninstall             Remove agent, config, and service
+  help                  Show this help message
 
 ${pc.bold('Global Flags:')}
   --server <url>      Server URL (default: http://localhost:9393)
@@ -83,11 +93,19 @@ ${pc.bold('Global Flags:')}
   --project <id>      Specify project ID (non-interactive)
   --detail <id>       Show details for a specific project (projects command)
 
+${pc.bold('Delete/Restore Flags:')}
+  --permanent         Hard delete (project-delete only)
+  --older-than <7d>   Purge trash older than N days (trash-purge only)
+
 ${pc.bold('Examples:')}
   sync status
   sync trigger my-project --yes
   sync archive my-project --json
   sync projects --detail my-project
+  sync project-delete my-project --permanent --yes
+  sync project-restore my-project
+  sync trash-list my-project
+  sync trash-purge my-project --older-than 7d --yes
   sync status --server http://remote:9393 --api-key sync_abc123
 
 ${pc.bold('Configuration:')}
@@ -110,6 +128,8 @@ export async function main(): Promise<void> {
   const apiKey = typeof flags['api-key'] === 'string' ? flags['api-key'] : undefined;
   const project = typeof flags['project'] === 'string' ? flags['project'] : undefined;
   const detail = typeof flags['detail'] === 'string' ? flags['detail'] : undefined;
+  const permanent = flags['permanent'] === true;
+  const olderThan = typeof flags['older-than'] === 'string' ? flags['older-than'] : undefined;
 
   // Commands that don't need the API client
   if (command === 'help' || command === '--help' || command === '-h') {
@@ -160,6 +180,26 @@ export async function main(): Promise<void> {
 
       case 'projects':
         await projectsCommand(client, { json, detail });
+        break;
+
+      case 'project-delete':
+        await projectDeleteCommand(client, positional[0], { project, json, yes, permanent });
+        break;
+
+      case 'project-restore':
+        await projectRestoreCommand(client, positional[0], { project, json, yes });
+        break;
+
+      case 'trash-list':
+        await trashListCommand(client, positional[0], { project, json });
+        break;
+
+      case 'trash-purge':
+        await trashPurgeCommand(client, positional[0], { project, json, yes, olderThan });
+        break;
+
+      case 'trash-restore':
+        await trashRestoreCommand(client, positional[0], positional[1], { project, json, yes });
         break;
 
       default:

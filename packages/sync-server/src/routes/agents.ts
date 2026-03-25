@@ -23,6 +23,15 @@ import {
   NotFoundError,
 } from '../lib/state.js';
 
+/**
+ * Strip the agentTokenHash from an agent record before sending to clients.
+ * The hash must never be exposed in API responses.
+ */
+function redactAgent(agent: Awaited<ReturnType<typeof loadAgents>>[number]) {
+  const { agentTokenHash: _hash, ...safe } = agent;
+  return safe;
+}
+
 export async function agentRegistryRoutes(app: FastifyInstance): Promise<void> {
   const server = app.withTypeProvider<ZodTypeProvider>();
 
@@ -44,11 +53,10 @@ export async function agentRegistryRoutes(app: FastifyInstance): Promise<void> {
 
       // Return the token only on registration — agent must save it.
       // The agentTokenHash is stripped from the response (never expose hashes).
-      const { agentTokenHash: _hash, ...agentWithoutHash } = agent;
       return reply.status(201).send({
         ok: true,
         agent: {
-          ...agentWithoutHash,
+          ...redactAgent(agent),
           status: getAgentStatus(agent),
         },
         agentToken,
@@ -62,7 +70,7 @@ export async function agentRegistryRoutes(app: FastifyInstance): Promise<void> {
 
     return reply.send({
       agents: agents.map((agent) => ({
-        ...agent,
+        ...redactAgent(agent),
         status: getAgentStatus(agent),
       })),
     });
@@ -83,7 +91,7 @@ export async function agentRegistryRoutes(app: FastifyInstance): Promise<void> {
         const agent = await getAgent(request.params.agentId);
         return reply.send({
           agent: {
-            ...agent,
+            ...redactAgent(agent),
             status: getAgentStatus(agent),
           },
         });
@@ -144,7 +152,7 @@ export async function agentRegistryRoutes(app: FastifyInstance): Promise<void> {
         return reply.send({
           ok: true,
           agent: {
-            ...agent,
+            ...redactAgent(agent),
             status: getAgentStatus(agent),
           },
         });
@@ -177,7 +185,7 @@ export async function agentRegistryRoutes(app: FastifyInstance): Promise<void> {
         return reply.send({
           ok: true,
           agent: {
-            ...agent,
+            ...redactAgent(agent),
             status: getAgentStatus(agent),
           },
         });
