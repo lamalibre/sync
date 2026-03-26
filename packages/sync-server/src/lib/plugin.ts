@@ -21,6 +21,7 @@ import { agentRegistryRoutes } from '../routes/agents.js';
 import { archiveRoutes } from '../routes/archive.js';
 import { setupRoutes } from '../routes/setup.js';
 import { setDataDir } from './state.js';
+import { TicketInstanceManager, type TicketCertConfig } from '@lamalibre/portlama-tickets';
 
 // ---------------------------------------------------------------------------
 // Plugin mode detection
@@ -62,6 +63,20 @@ export interface PluginOptions {
    * Defaults to empty string (routes already contain /api/sync prefix).
    */
   readonly prefix?: string;
+
+  /**
+   * Panel URL for ticket system integration.
+   * When provided along with `ticketCerts`, the plugin registers a
+   * `sync:connect` ticket instance and manages tickets for agents.
+   * Only used in plugin mode.
+   */
+  readonly panelUrl?: string;
+
+  /**
+   * mTLS certificate paths for ticket system API calls.
+   * Required when `panelUrl` is set.
+   */
+  readonly ticketCerts?: TicketCertConfig;
 }
 
 // ---------------------------------------------------------------------------
@@ -144,47 +159,101 @@ export function buildPlugin(options?: PluginOptions): FastifyPluginAsync {
     await app.register(setupRoutes);
 
     app.log.info('Sync plugin routes registered');
+
+    // Start ticket manager if panel URL and certs are provided.
+    // This registers a sync:connect ticket instance and handles
+    // ticket lifecycle for agent authorization.
+    const panelUrl =
+      options?.panelUrl ?? process.env['PORTLAMA_PANEL_URL'];
+    const ticketCerts = options?.ticketCerts ?? readTicketCertsFromEnv();
+
+    if (panelUrl && ticketCerts) {
+      const ticketManager = new TicketInstanceManager({
+        panelUrl,
+        certs: ticketCerts,
+        scope: 'sync:connect',
+        transport: {
+          strategies: ['tunnel'],
+          preferred: 'tunnel',
+        },
+        logger: app.log,
+      });
+
+      // Decorate the Fastify instance so routes can access the ticket manager
+      // (e.g., to request tickets when agents register).
+      app.decorate('ticketManager', ticketManager);
+
+      // Start asynchronously — don't block route registration
+      void ticketManager.start().catch((err: unknown) => {
+        app.log.error(
+          { err: err instanceof Error ? err.message : String(err) },
+          'Failed to start ticket manager',
+        );
+      });
+
+      // Graceful shutdown
+      app.addHook('onClose', async () => {
+        await ticketManager.stop();
+      });
+
+      app.log.info('Ticket manager configured');
+    }
   };
 
   return plugin;
 }
 
 // ---------------------------------------------------------------------------
+// Ticket cert helpers
+// ---------------------------------------------------------------------------
+
+/**
+ * Read ticket certificate paths from environment variables.
+ * Returns null if any required variable is missing.
+ */
+function readTicketCertsFromEnv(): TicketCertConfig | null {
+  const certPath = process.env['PORTLAMA_CERT_PATH'];
+  const keyPath = process.env['PORTLAMA_KEY_PATH'];
+  const caPath = process.env['PORTLAMA_CA_PATH'];
+
+  if (!certPath || !keyPath || !caPath) return null;
+
+  return { certPath, keyPath, caPath };
+}
+
+// ---------------------------------------------------------------------------
+// Fastify type augmentation for ticket manager
+// ---------------------------------------------------------------------------
+
+declare module 'fastify' {
+  interface FastifyInstance {
+    ticketManager?: TicketInstanceManager;
+  }
+}
+
+// ---------------------------------------------------------------------------
 // Plugin manifest reader
 // ---------------------------------------------------------------------------
 
-/** Shape of the portlama-plugin.json manifest. */
+/** Shape of the portlama-plugin.json manifest (new format). */
 export interface PluginManifest {
   readonly name: string;
   readonly displayName: string;
   readonly description: string;
   readonly version: string;
-  readonly roles: {
-    readonly host: {
-      readonly package: string;
-      readonly binary: string;
-      readonly singleton: boolean;
-      readonly description: string;
-    };
-    readonly agent: {
-      readonly package: string;
-      readonly binary: string;
-      readonly singleton: boolean;
-      readonly description: string;
-    };
+  readonly capabilities: readonly string[];
+  readonly packages: {
+    readonly server: string;
+    readonly agent: string;
   };
   readonly panel: {
     readonly pages: ReadonlyArray<{
       readonly path: string;
       readonly title: string;
       readonly icon: string;
-      readonly description: string;
     }>;
-    readonly apiPrefix: string;
   };
-  readonly capabilities: {
-    readonly agent: readonly string[];
-  };
+  readonly config: Record<string, unknown>;
 }
 
 /**
@@ -205,8 +274,11 @@ export function parsePluginManifest(raw: unknown): PluginManifest {
   if (typeof obj['version'] !== 'string') {
     throw new Error("Plugin manifest must have a 'version' string field");
   }
-  if (typeof obj['roles'] !== 'object' || obj['roles'] === null) {
-    throw new Error("Plugin manifest must have a 'roles' object field");
+  if (!Array.isArray(obj['capabilities'])) {
+    throw new Error("Plugin manifest must have a 'capabilities' array field");
+  }
+  if (typeof obj['packages'] !== 'object' || obj['packages'] === null) {
+    throw new Error("Plugin manifest must have a 'packages' object field");
   }
 
   // Trust the shape after basic validation — full Zod validation

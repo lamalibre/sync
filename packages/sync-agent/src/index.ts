@@ -102,6 +102,26 @@ export {
   type MtlsConfig,
   type PluginModeSettings,
 } from './lib/plugin-mode.js';
+export {
+  TicketClient,
+  TicketSessionManager,
+  createTicketDispatcher,
+  type TicketClientOptions,
+  type TicketSessionManagerOptions,
+  type SessionState,
+  type TicketCertConfig,
+  type TransportStrategy,
+  type TransportConfig,
+  type TransportInfo,
+  type RegisterInstanceResult,
+  type TicketInboxEntry,
+  type RequestTicketResult,
+  type TicketValidationResult,
+  type SessionStatus,
+  type TerminationReason,
+  type SessionInfo,
+  type SessionHeartbeatResult,
+} from '@lamalibre/portlama-tickets';
 
 /**
  * Entry point for the sync-agent daemon.

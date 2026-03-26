@@ -51,6 +51,20 @@ export async function agentRegistryRoutes(app: FastifyInstance): Promise<void> {
         'Agent registered',
       );
 
+      // In plugin mode, request a ticket for the newly registered agent
+      // so it can establish a session. The ticket manager may not be ready
+      // yet (startup race) — this is best-effort; the agent will get a
+      // ticket on a subsequent heartbeat if this attempt fails.
+      const ticketManager = app.ticketManager;
+      if (ticketManager?.isReady()) {
+        void ticketManager.requestTicketForAgent(agent.name, true).catch((err: unknown) => {
+          request.log.warn(
+            { err: err instanceof Error ? err.message : String(err), agentName: agent.name },
+            'Failed to request ticket for newly registered agent',
+          );
+        });
+      }
+
       // Return the token only on registration — agent must save it.
       // The agentTokenHash is stripped from the response (never expose hashes).
       return reply.status(201).send({
@@ -148,6 +162,20 @@ export async function agentRegistryRoutes(app: FastifyInstance): Promise<void> {
 
       try {
         const agent = await updateAgentHeartbeat(request.params.agentId, request.body);
+
+        // In plugin mode, periodically re-issue tickets for agents that may
+        // not yet have a valid session. This covers the case where the initial
+        // ticket request on registration failed or expired before the agent
+        // could validate it. Best-effort — failures are logged, not propagated.
+        const ticketManager = app.ticketManager;
+        if (ticketManager?.isReady()) {
+          void ticketManager.requestTicketForAgent(agent.name).catch((err: unknown) => {
+            request.log.debug(
+              { err: err instanceof Error ? err.message : String(err), agentName: agent.name },
+              'Failed to request ticket on heartbeat (may already have active session)',
+            );
+          });
+        }
 
         return reply.send({
           ok: true,

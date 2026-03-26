@@ -46,6 +46,12 @@ import {
   type PluginModeSettings,
 } from './lib/plugin-mode.js';
 import {
+  TicketClient,
+  TicketSessionManager,
+  createTicketDispatcher,
+  type SessionState,
+} from '@lamalibre/portlama-tickets';
+import {
   writeRcloneConfig,
   getRcloneConfigPath,
   getProjectRemoteName,
@@ -126,6 +132,15 @@ export class Agent {
   /** Timer for periodic trash cleanup. */
   private trashCleanupTimer: ReturnType<typeof setInterval> | null = null;
 
+  /** Ticket session manager for plugin mode authorization. */
+  private ticketSession: TicketSessionManager | null = null;
+
+  /** Ticket dispatcher — must be closed on shutdown. */
+  private ticketDispatcher: import('undici').Agent | null = null;
+
+  /** Whether the agent is operating in plugin mode with ticket auth. */
+  private ticketAuthEnabled = false;
+
   constructor(options: AgentOptions) {
     this.agentDir = options.agentDir;
     this.logger = options.logger.child({ component: 'agent' });
@@ -174,6 +189,31 @@ export class Agent {
         logger: this.logger,
         httpsAgent,
       });
+
+      // Set up ticket session manager for panel-mediated authorization.
+      // Create a dedicated dispatcher for the ticket API using the same
+      // PEM certs. The panel URL is the same as the server URL in plugin mode.
+      this.ticketDispatcher = await createTicketDispatcher({
+        certs: {
+          certPath: pluginSettings.mtls.certPath,
+          keyPath: pluginSettings.mtls.keyPath,
+          caPath: pluginSettings.mtls.caPath,
+        },
+      });
+      const ticketClient = new TicketClient({
+        panelUrl: this.settings.serverUrl,
+        dispatcher: this.ticketDispatcher,
+        logger: this.logger,
+      });
+      this.ticketSession = new TicketSessionManager({
+        ticketClient,
+        scope: 'sync:connect',
+        logger: this.logger,
+        onStateChange: (state: SessionState, reason) => {
+          this.handleTicketStateChange(state, reason);
+        },
+      });
+      this.ticketAuthEnabled = true;
     } else {
       if (pluginMode) {
         this.logger.warn(
@@ -198,6 +238,13 @@ export class Agent {
 
     // Register with the server (or restore persisted agent ID)
     await this.registerWithServer();
+
+    // Start ticket session polling in plugin mode.
+    // The agent will begin operations once a ticket is validated and
+    // a session is established. In standalone mode, this is skipped.
+    if (this.ticketSession) {
+      this.ticketSession.start();
+    }
 
     // Try to fetch fresh config from the server first.
     // Only fall back to cached config if the server is unreachable.
@@ -261,6 +308,15 @@ export class Agent {
     if (this.trashCleanupTimer) {
       clearInterval(this.trashCleanupTimer);
       this.trashCleanupTimer = null;
+    }
+
+    // Stop ticket session and close its dispatcher
+    if (this.ticketSession) {
+      await this.ticketSession.stop();
+    }
+    if (this.ticketDispatcher) {
+      await this.ticketDispatcher.close();
+      this.ticketDispatcher = null;
     }
 
     // Stop all file watchers
@@ -606,6 +662,15 @@ export class Agent {
       return null;
     }
 
+    // In plugin mode with ticket auth, gate on active session
+    if (this.ticketAuthEnabled && !this.ticketSession?.isAuthorized()) {
+      this.logger.info(
+        { projectId, sessionState: this.ticketSession?.getState() },
+        'Sync blocked: no active ticket session',
+      );
+      return null;
+    }
+
     // Check if a sync is already active for this project
     if (this.activeSyncs.has(projectId)) {
       this.logger.info({ projectId, trigger }, 'Sync already in progress for project, skipping');
@@ -755,6 +820,15 @@ export class Agent {
       return null;
     }
 
+    // In plugin mode with ticket auth, gate on active session
+    if (this.ticketAuthEnabled && !this.ticketSession?.isAuthorized()) {
+      this.logger.info(
+        { projectId, sessionState: this.ticketSession?.getState() },
+        'Archive blocked: no active ticket session',
+      );
+      return null;
+    }
+
     if (this.activeSyncs.has(projectId)) {
       this.logger.info({ projectId }, 'Operation already in progress for project, cannot archive');
       return null;
@@ -836,6 +910,15 @@ export class Agent {
   async triggerRestore(projectId: string, pendingOperationId?: string, singleFilePath?: string): Promise<string | null> {
     if (!this.currentConfig) {
       this.logger.warn('Cannot trigger restore: no config loaded');
+      return null;
+    }
+
+    // In plugin mode with ticket auth, gate on active session
+    if (this.ticketAuthEnabled && !this.ticketSession?.isAuthorized()) {
+      this.logger.info(
+        { projectId, sessionState: this.ticketSession?.getState() },
+        'Restore blocked: no active ticket session',
+      );
       return null;
     }
 
@@ -951,6 +1034,44 @@ export class Agent {
   // ---------------------------------------------------------------------------
   // Private: Registration and heartbeat
   // ---------------------------------------------------------------------------
+
+  /**
+   * Handle ticket session state changes.
+   * Called by the TicketSessionManager when authorization state changes.
+   */
+  private handleTicketStateChange(state: SessionState, reason?: string): void {
+    switch (state) {
+      case 'authorized':
+        this.logger.info('Ticket session authorized — sync operations enabled');
+        break;
+
+      case 'terminated':
+        this.logger.warn(
+          { reason },
+          'Ticket session terminated — pausing sync operations',
+        );
+        // Cancel all active syncs to respect authorization revocation
+        for (const [projectId, activeSync] of this.activeSyncs) {
+          this.logger.info(
+            { projectId, operationId: activeSync.operationId },
+            'Cancelling active sync due to session termination',
+          );
+          activeSync.abortController.abort();
+        }
+        break;
+
+      case 'waiting':
+        this.logger.info('Waiting for ticket — sync operations paused');
+        break;
+
+      case 'grace':
+        this.logger.warn('Ticket session in grace period — sync operations paused');
+        break;
+
+      case 'stopped':
+        break;
+    }
+  }
 
   /**
    * Register this agent with the server.

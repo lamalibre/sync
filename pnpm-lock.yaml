@@ -63,6 +63,9 @@ importers:
 
   packages/sync-agent:
     dependencies:
+      '@lamalibre/portlama-tickets':
+        specifier: ^0.1.0
+        version: 0.1.0
       '@lamalibre/sync-shared':
         specifier: workspace:*
         version: link:../sync-shared
@@ -183,6 +186,9 @@ importers:
       '@fastify/cors':
         specifier: ^11.0.0
         version: 11.2.0
+      '@lamalibre/portlama-tickets':
+        specifier: ^0.1.0
+        version: 0.1.0
       '@lamalibre/sync-shared':
         specifier: workspace:*
         version: link:../sync-shared
@@ -195,6 +201,9 @@ importers:
       fastify-type-provider-zod:
         specifier: ^4.0.2
         version: 4.0.2(fastify@5.8.4)(zod@3.25.76)
+      undici:
+        specifier: ^7.24.5
+        version: 7.24.5
       zod:
         specifier: ^3.24.0
         version: 3.25.76
@@ -699,6 +708,10 @@ packages:
 
   '@jridgewell/trace-mapping@0.3.31':
     resolution: {integrity: sha512-zzNR+SdQSDJzc8joaeP8QQoCQr8NuYx2dIIytl1QeBEZHJ9uW6hebsrYgbz8hJwUQao3TWCMtmfV8Nu1twOLAw==}
+
+  '@lamalibre/portlama-tickets@0.1.0':
+    resolution: {integrity: sha512-z4pLJDGkP5JAkKg59SuODphSPS2DWnx2qZoa05o996f+0Ygr3RWqo1xcWUauCAV523yaPm65SJjDEc4v+sdceg==}
+    engines: {node: '>=20.0.0'}
 
   '@manypkg/find-root@1.1.0':
     resolution: {integrity: sha512-mki5uBvhHzO8kYYix/WRy2WX8S3B5wdVSc9D6KcU5lQNglP2yt58/VfLuAK49glRXChosY8ap2oJ1qgma3GUVA==}
@@ -2952,6 +2965,10 @@ snapshots:
     dependencies:
       '@jridgewell/resolve-uri': 3.1.2
       '@jridgewell/sourcemap-codec': 1.5.5
+
+  '@lamalibre/portlama-tickets@0.1.0':
+    dependencies:
+      undici: 7.24.5
 
   '@manypkg/find-root@1.1.0':
     dependencies:

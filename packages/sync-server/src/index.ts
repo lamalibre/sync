@@ -16,6 +16,11 @@ export {
   type PluginOptions,
   type PluginManifest,
 } from './lib/plugin.js';
+export {
+  TicketInstanceManager,
+  type TicketCertConfig,
+  type TicketInstanceManagerOptions,
+} from '@lamalibre/portlama-tickets';
 
 export async function main(): Promise<void> {
   const config = await loadConfig();
