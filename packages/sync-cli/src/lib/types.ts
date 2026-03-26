@@ -9,9 +9,9 @@
 export interface Project {
   id: string;
   name: string;
-  localPath: string;
   remotePath: string;
   direction: string;
+  includes: string[];
   excludes: string[];
   schedule: string | null;
   encrypted: boolean;
@@ -21,4 +21,11 @@ export interface Project {
   status: string;
   lastSync: string | null;
   deletedAt: string | null;
+  bandwidthLimit: string | null;
+  watchDebounceMs: number | null;
+  softDelete: {
+    enabled: boolean;
+    retentionDays: number;
+    cleanupSchedule: string;
+  } | null;
 }

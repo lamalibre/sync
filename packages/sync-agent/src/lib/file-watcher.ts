@@ -27,6 +27,8 @@ export interface FileWatcherOptions {
   readonly projectId: string;
   /** Absolute path to the local project directory. */
   readonly localPath: string;
+  /** Glob patterns to include — only matching files trigger sync. Empty means all files. */
+  readonly includes: readonly string[];
   /** Glob patterns to exclude from watching. */
   readonly excludes: readonly string[];
   /** Debounce interval in milliseconds (default: 5000). */
@@ -49,6 +51,7 @@ export class FileWatcher {
   private readonly onChanges: OnChangesDetected;
   private readonly logger: Logger;
 
+  private readonly includeMatchers: readonly RegExp[];
   private watcher: ChokidarFSWatcher | null = null;
   private debounceTimer: ReturnType<typeof setTimeout> | null = null;
   private pendingChanges: Set<string> = new Set();
@@ -64,9 +67,14 @@ export class FileWatcher {
       projectId: options.projectId,
     });
 
+    // Build include matchers — when non-empty, only matching files trigger sync
+    this.includeMatchers = buildIncludeMatchers(options.includes);
+
     // Build chokidar-compatible ignore patterns
     const ignored = buildIgnorePatterns(options.excludes, this.localPath);
 
+    // Create the chokidar watcher eagerly so it is ready when start() is called.
+    // stop() handles cleanup if start() is never called.
     this.watcher = chokidar.watch(this.localPath, {
       // Do not follow symlinks outside the project directory (security)
       followSymlinks: false,
@@ -127,7 +135,7 @@ export class FileWatcher {
    * Stop watching and clean up resources.
    */
   async stop(): Promise<void> {
-    if (!this.running) return;
+    if (!this.running && !this.watcher) return;
     this.running = false;
 
     this.logger.info('Stopping file watcher');
@@ -162,6 +170,12 @@ export class FileWatcher {
 
     // Compute relative path for logging (never log absolute paths with user data)
     const relativePath = relative(this.localPath, filePath);
+
+    // When include patterns are set, skip files that don't match any pattern
+    if (this.includeMatchers.length > 0) {
+      const matches = this.includeMatchers.some((re) => re.test(relativePath));
+      if (!matches) return;
+    }
 
     this.logger.debug({ event, file: relativePath }, 'File change detected');
 
@@ -235,6 +249,42 @@ function buildIgnorePatterns(
   }
 
   return patterns;
+}
+
+/**
+ * Build regex matchers for include patterns.
+ *
+ * When include patterns are set, only file changes matching at least one
+ * pattern should trigger a sync. Empty includes means all files match.
+ *
+ * Supports the same pattern formats as rclone include:
+ * - Extension globs: "*.md" matches any file ending in .md
+ * - Directory globs: "src/**" matches anything under src/
+ * - Exact: "README.md" matches that filename anywhere
+ */
+function buildIncludeMatchers(includes: readonly string[]): RegExp[] {
+  if (includes.length === 0) return [];
+
+  const matchers: RegExp[] = [];
+  for (const pattern of includes) {
+    if (pattern.startsWith('*.')) {
+      // Extension pattern: "*.md" -> match files ending in .md
+      const ext = pattern.slice(1); // ".md"
+      matchers.push(new RegExp(`${escapeRegex(ext)}$`));
+    } else if (pattern.endsWith('/**')) {
+      // Directory glob: "src/**" -> match anything under src/
+      const dir = pattern.slice(0, -3);
+      matchers.push(new RegExp(`(^|[/\\\\])${escapeRegex(dir)}[/\\\\]`));
+    } else if (pattern.endsWith('/')) {
+      // Directory prefix: "src/" -> match anything under src/
+      const dir = pattern.slice(0, -1);
+      matchers.push(new RegExp(`(^|[/\\\\])${escapeRegex(dir)}[/\\\\]`));
+    } else {
+      // Exact filename match anywhere in the tree
+      matchers.push(new RegExp(`(^|[/\\\\])${escapeRegex(pattern)}$`));
+    }
+  }
+  return matchers;
 }
 
 /**

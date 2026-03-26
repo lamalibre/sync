@@ -57,9 +57,9 @@ export interface ProviderConfig {
 export interface ProjectDefinition {
   readonly id: string;
   readonly name: string;
-  readonly localPath: string;
   readonly remotePath: string;
   readonly direction: SyncDirection;
+  readonly includes: readonly string[];
   readonly excludes: readonly string[];
   readonly encrypted: boolean;
   /**
@@ -95,7 +95,7 @@ export interface ProjectDefinition {
   readonly pendingType?: 'sync' | 'archive' | 'restore';
 }
 
-/** Agent configuration returned by the server's GET /api/sync/agent/config endpoint. */
+/** Agent configuration returned by the server's GET /api/sync/agent-config endpoint. */
 export interface AgentConfig {
   readonly provider: ProviderConfig;
   readonly projects: readonly ProjectDefinition[];
@@ -172,6 +172,7 @@ export interface RcloneSyncOptions {
   readonly rcloneConfigPath: string;
   readonly remoteName: string;
   readonly bucket: string;
+  readonly includes: readonly string[];
   readonly excludes: readonly string[];
   readonly bandwidthLimit?: string;
   readonly softDelete?: SoftDeleteConfig;
@@ -187,6 +188,7 @@ export interface RcloneBisyncOptions {
   readonly rcloneConfigPath: string;
   readonly remoteName: string;
   readonly bucket: string;
+  readonly includes: readonly string[];
   readonly excludes: readonly string[];
   readonly bandwidthLimit?: string;
   readonly resync: boolean;

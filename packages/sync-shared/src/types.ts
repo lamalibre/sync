@@ -53,6 +53,29 @@ export const PROJECT_STATUSES = [
 export type ProjectStatus = (typeof PROJECT_STATUSES)[number];
 
 // ---------------------------------------------------------------------------
+// Access mode (agent-local direction override)
+// ---------------------------------------------------------------------------
+
+export const ACCESS_MODES = ['full', 'push-only', 'pull-only', 'protected'] as const;
+
+export type AccessMode = (typeof ACCESS_MODES)[number];
+
+// ---------------------------------------------------------------------------
+// Confirm mode (sync preview before execution)
+// ---------------------------------------------------------------------------
+
+export const CONFIRM_MODES = ['auto', 'confirm-destructive', 'confirm-always'] as const;
+
+export type ConfirmMode = (typeof CONFIRM_MODES)[number];
+
+/** Default delete threshold: require confirmation if more than this many files would be deleted. */
+export const DEFAULT_DELETE_THRESHOLD = 10;
+
+/** Only lowercase alphanumeric characters and hyphens, max 100 characters. */
+export const PROJECT_ID_RE = /^[a-z0-9-]+$/;
+export const PROJECT_ID_MAX_LENGTH = 100;
+
+// ---------------------------------------------------------------------------
 // Soft delete configuration
 // ---------------------------------------------------------------------------
 

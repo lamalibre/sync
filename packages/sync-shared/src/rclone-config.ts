@@ -158,9 +158,17 @@ function sanitizeIniValue(value: string): string {
  * Build an INI section from a section name and key-value pairs.
  * Filters out empty values.
  */
+const SAFE_INI_NAME = /^[a-zA-Z0-9_-]+$/;
+
 function buildIni(sectionName: string, entries: Record<string, string>): string {
+  if (!SAFE_INI_NAME.test(sectionName)) {
+    throw new Error(`Invalid INI section name: ${sectionName}`);
+  }
   const lines: string[] = [`[${sectionName}]`];
   for (const [key, value] of Object.entries(entries)) {
+    if (!SAFE_INI_NAME.test(key)) {
+      throw new Error(`Invalid INI key: ${key}`);
+    }
     if (value !== '') {
       lines.push(`${key} = ${sanitizeIniValue(value)}`);
     }

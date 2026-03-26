@@ -46,13 +46,30 @@ export {
 export {
   runRcloneSync,
   runRcloneBisync,
+  runRcloneDryRun,
+  runRcloneProtectedPull,
   generateOperationId,
+  buildIncludeFlags,
   buildExcludeFlags,
   buildBandwidthFlags,
   parseBisyncConflicts,
 } from './lib/rclone-runner.js';
 export { createProgressParser } from './lib/progress-parser.js';
 export { AGENT_DIR } from './lib/config.js';
+export {
+  savePendingSync,
+  readPendingSync,
+  listPendingSyncs,
+  approvePendingSync,
+  rejectPendingSync,
+  removePendingSync,
+  cleanExpiredPendingSyncs,
+  buildPendingSyncPreview,
+  MAX_PREVIEW_CHANGES,
+  type DryRunChange,
+  type PendingSyncPreview,
+} from '@lamalibre/sync-shared';
+export { parseDryRunOutput } from './lib/dry-run-parser.js';
 export {
   FileWatcher,
   type OnChangesDetected,

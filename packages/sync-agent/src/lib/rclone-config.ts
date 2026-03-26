@@ -16,6 +16,7 @@
  */
 
 import { join } from 'node:path';
+import { createHash } from 'node:crypto';
 import { execa } from 'execa';
 import type { Logger } from 'pino';
 import {
@@ -53,6 +54,11 @@ export function getRcloneConfigPath(agentDir: string): string {
 export async function obscurePassword(plainPassword: string): Promise<string> {
   const result = await execa('rclone', ['obscure', '-'], {
     input: plainPassword,
+    env: {
+      PATH: process.env['PATH'] ?? '',
+      HOME: process.env['HOME'] ?? '',
+    },
+    extendEnv: false,
     stdout: 'pipe',
     stderr: 'pipe',
   });
@@ -84,9 +90,9 @@ export function getProjectRemoteName(
     return RCLONE_REMOTE_NAME;
   }
 
-  // Look up the crypt remote name from the mapping
+  // Look up the crypt remote name from the mapping (keyed by password hash)
   if (cryptRemoteMap) {
-    const remoteName = cryptRemoteMap.get(effectivePassword);
+    const remoteName = getCryptRemoteName(cryptRemoteMap, effectivePassword);
     if (remoteName) {
       return remoteName;
     }
@@ -102,6 +108,15 @@ export function getProjectRemoteName(
  * "sync-encrypted". When different passwords exist, subsequent remotes
  * are named "sync-encrypted-2", "sync-encrypted-3", etc.
  */
+/**
+ * Build a mapping from encryption password hash → crypt remote name.
+ *
+ * Uses SHA-256 hashes as map keys instead of raw passwords so that
+ * plaintext passwords are not held as strongly-referenced Map keys
+ * for the lifetime of the process.
+ *
+ * Callers use `getCryptRemoteName` to look up the remote name for a password.
+ */
 export function buildCryptRemoteMap(
   projects: readonly ProjectDefinition[],
   provider: ProviderConfig,
@@ -113,15 +128,29 @@ export function buildCryptRemoteMap(
     if (!project.encrypted) continue;
 
     const effectivePassword = project.encryptionPassword ?? provider.encryptionPassword;
-    if (!effectivePassword || map.has(effectivePassword)) continue;
+    if (!effectivePassword) continue;
+
+    const passwordHash = createHash('sha256').update(effectivePassword).digest('hex');
+    if (map.has(passwordHash)) continue;
 
     const remoteName =
       counter === 1 ? RCLONE_ENCRYPTED_REMOTE_NAME : `${RCLONE_ENCRYPTED_REMOTE_NAME}-${counter}`;
-    map.set(effectivePassword, remoteName);
+    map.set(passwordHash, remoteName);
     counter += 1;
   }
 
   return map;
+}
+
+/**
+ * Look up the crypt remote name for a given encryption password.
+ */
+export function getCryptRemoteName(
+  cryptRemoteMap: ReadonlyMap<string, string>,
+  password: string,
+): string | undefined {
+  const passwordHash = createHash('sha256').update(password).digest('hex');
+  return cryptRemoteMap.get(passwordHash);
 }
 
 /**
@@ -139,12 +168,21 @@ export async function generateRcloneConfig(
   // Generate the base remote section
   sections.push(generateBaseRemote(provider));
 
-  // Build the crypt remote map for all encrypted projects
+  // Build the crypt remote map (hash → remoteName) for all encrypted projects,
+  // then generate a crypt remote section for each unique password.
   const cryptRemoteMap = buildCryptRemoteMap(projects, provider);
+  const generatedRemotes = new Set<string>();
 
-  // Generate crypt remote sections for each unique encryption password
-  for (const [password, remoteName] of cryptRemoteMap) {
-    const cryptSection = await generateCryptRemote(provider.bucket, password, remoteName);
+  for (const project of projects) {
+    if (!project.encrypted) continue;
+    const effectivePassword = project.encryptionPassword ?? provider.encryptionPassword;
+    if (!effectivePassword) continue;
+
+    const remoteName = getCryptRemoteName(cryptRemoteMap, effectivePassword);
+    if (!remoteName || generatedRemotes.has(remoteName)) continue;
+
+    generatedRemotes.add(remoteName);
+    const cryptSection = await generateCryptRemote(provider.bucket, effectivePassword, remoteName);
     sections.push(cryptSection);
   }
 
@@ -215,11 +253,19 @@ function generateBaseRemote(provider: ProviderConfig): string {
  * The password is obscured using `rclone obscure` so it is not stored
  * in plaintext in the rclone.conf file.
  */
+/** Minimum encryption password length — mirrors the server-side Zod schema. */
+const MIN_ENCRYPTION_PASSWORD_LENGTH = 12;
+
 async function generateCryptRemote(
   bucket: string,
   encryptionPassword: string,
   remoteName: string = RCLONE_ENCRYPTED_REMOTE_NAME,
 ): Promise<string> {
+  if (encryptionPassword.length < MIN_ENCRYPTION_PASSWORD_LENGTH) {
+    throw new Error(
+      `Encryption password must be at least ${MIN_ENCRYPTION_PASSWORD_LENGTH} characters (got ${encryptionPassword.length})`,
+    );
+  }
   const obscured = await obscurePassword(encryptionPassword);
   return buildCryptIni(remoteName, bucket, obscured);
 }

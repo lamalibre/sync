@@ -52,6 +52,8 @@ function mapStorageToProviderConfig(
         applicationKeyId: decrypted.accessKey,
         applicationKey: decrypted.secretKey,
       };
+    case 'local':
+      return base;
     case 'spaces':
     case 's3':
     case 'custom':
@@ -116,7 +118,6 @@ export async function agentRoutes(app: FastifyInstance): Promise<void> {
         return {
           id: p.id,
           name: p.name,
-          localPath: p.localPath,
           remotePath: p.remotePath,
           direction: p.direction,
           includes: p.includes,

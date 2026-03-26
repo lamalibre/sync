@@ -101,6 +101,26 @@ EOF
 chmod 0600 "${AGENT_HOME}/agent-settings.json"
 
 # ---------------------------------------------------------------------------
+# 4b. Create approved-paths.json for default e2e project
+# ---------------------------------------------------------------------------
+echo "--- Creating approved-paths.json ---"
+
+cat > "${AGENT_HOME}/approved-paths.json" <<EOF
+{
+  "version": 1,
+  "entries": [
+    {
+      "projectId": "e2e-test-project",
+      "localPath": "/tmp/sync-e2e-project",
+      "approvedAt": "2026-01-01T00:00:00.000Z",
+      "projectName": "e2e-test-project"
+    }
+  ]
+}
+EOF
+chmod 0600 "${AGENT_HOME}/approved-paths.json"
+
+# ---------------------------------------------------------------------------
 # 5. Create test project directory with sample files
 # ---------------------------------------------------------------------------
 echo "--- Creating test project directory ---"

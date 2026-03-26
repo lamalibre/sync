@@ -62,20 +62,27 @@ You use the CLI or Portlama panel to:
 ```
 1. Admin creates project "training-data"
    └── POST /api/sync/projects
-   └── Server stores: localPath=/home/user/data, remotePath=training-data,
+   └── Server stores: remotePath=training-data,
        direction=bidirectional, watch=true, schedule="0 */6 * * *"
 
 2. Agent polls server (every 30s)
    └── GET /api/sync/agent-config
-   └── Agent detects new project, generates rclone.conf,
-       starts file watcher, sets up cron schedule
+   └── Agent detects new project, checks approved-paths.json for local path,
+       generates rclone.conf, starts file watcher, sets up cron schedule
+   └── (If not yet approved, agent queues the project in pending-syncs/
+       until the admin runs `sync agent-approve`)
 
 3. File change detected (or cron fires, or manual trigger)
    └── Agent debounces changes (5 seconds)
-   └── Calls rclone bisync with:
+   └── For bidirectional: rclone bisync with:
        - source: /home/user/data
        - dest: sync-remote:bucket/training-data
-       - --transfers=4, --checkers=8, --stats=2s
+       - --verbose, --retries, --low-level-retries
+       - --conflict-resolve/--conflict-loser (per conflict strategy)
+       - --bwlimit (if configured)
+   └── For push/pull: rclone sync with:
+       - --progress, --stats-one-line, --stats
+       - --transfers, --checkers, --retries, --low-level-retries
        - --bwlimit (if configured)
    └── Parses progress from rclone stderr in real-time
 
@@ -104,7 +111,8 @@ You use the CLI or Portlama panel to:
          "bucket": "my-sync",
          "projectId": "training-data",
          "totalSize": 52428800000,
-         "fileCount": 1247
+         "fileCount": 1247,
+         "files": [...]   // included when ≤200 files, omitted otherwise
        }
    └── Reports result: 50 GB freed
 
@@ -167,6 +175,8 @@ You use the CLI or Portlama panel to:
 │  ├─ cached-config.json   (encrypted config cache)                    │
 │  ├─ rclone.conf          (generated, mode 0600)                      │
 │  ├─ master.key           (local encryption key)                      │
+│  ├─ approved-paths.json  (project→local path mappings)               │
+│  ├─ pending-syncs/       (preview files for confirm mode)            │
 │  └─ sync-state.json      (per-project sync state)                    │
 └──────────────────────────────────────────────────────────────────────┘
 ```

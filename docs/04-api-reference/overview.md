@@ -29,6 +29,13 @@ Authorization: Bearer <api-key>
 
 The API key is generated during installation via `POST /api/sync/setup/api-key` using a one-time setup token. The raw key is shown once and stored as a SHA-256 hash on the server.
 
+**Agent Token (heartbeat):**
+```
+X-Agent-Token: <agent-token>
+```
+
+Agents receive a unique token upon registration (`POST /api/sync/agents`). The heartbeat endpoint (`POST /api/sync/agents/:id/heartbeat`) authenticates using this per-agent token via the `X-Agent-Token` header instead of the primary API key. The raw token is returned only once during registration; the server stores its SHA-256 hash.
+
 **Development mode** (`SYNC_SKIP_AUTH=1`): Authentication is bypassed for requests from loopback addresses only. A loud warning is logged on startup. This is NOT based on `NODE_ENV`.
 
 ### Plugin Mode
@@ -64,8 +71,8 @@ Input validated with Zod schemas at the route level:
   "error": "Validation error",
   "details": [
     {
-      "path": ["localPath"],
-      "message": "Local path must be absolute"
+      "path": ["remotePath"],
+      "message": "Remote path contains invalid characters"
     }
   ]
 }
@@ -77,7 +84,7 @@ Input validated with Zod schemas at the route level:
 | --- | --- | --- |
 | 200 | Success | Project updated, status retrieved |
 | 201 | Created | Project created, agent registered |
-| 400 | Validation failed | Invalid path, bad cron expression, already archived |
+| 400 | Validation failed | Invalid path, bad cron expression, already archived, storage not configured, project is deleted |
 | 401 | Auth missing | No Authorization header or API key |
 | 403 | Forbidden | Invalid API key or agent token |
 | 404 | Not found | Project or agent does not exist |
@@ -88,7 +95,7 @@ Input validated with Zod schemas at the route level:
 
 | Method | Path | Auth | Description |
 | --- | --- | --- | --- |
-| GET | `/api/sync/health` | None | Health check |
+| GET | `/api/sync/health` | None | Health check — returns `{ ok, uptime, timestamp }` |
 | POST | `/api/sync/setup/api-key` | Setup token | Generate API key |
 | GET | `/api/sync/storage` | Admin | Get storage config (redacted) |
 | PATCH | `/api/sync/storage` | Admin | Update storage config |
@@ -102,7 +109,7 @@ Input validated with Zod schemas at the route level:
 | POST | `/api/sync/projects/:id/undelete` | Admin | Restore soft-deleted project |
 | POST | `/api/sync/projects/:id/sync` | Admin | Trigger sync |
 | POST | `/api/sync/projects/:id/archive` | Admin | Start archive |
-| POST | `/api/sync/projects/:id/restore` | Admin | Start restore |
+| POST | `/api/sync/projects/:id/restore` | Admin | Start restore (optional `filePath` for single-file restore) |
 | GET | `/api/sync/projects/:id/status` | Admin/Agent | Project status |
 | GET | `/api/sync/projects/:id/stubs` | Admin | Archive stub info |
 | GET | `/api/sync/projects/:id/savings` | Admin | Archive savings |
@@ -114,7 +121,7 @@ Input validated with Zod schemas at the route level:
 | POST | `/api/sync/projects/:id/restore-trash` | Admin | Restore files from trash |
 | GET | `/api/sync/agents` | Admin | List agents |
 | GET | `/api/sync/agents/:id` | Admin | Get agent |
-| POST | `/api/sync/agents` | Agent | Register agent |
+| POST | `/api/sync/agents` | Admin | Register agent |
 | PATCH | `/api/sync/agents/:id/projects` | Admin | Assign projects |
 | POST | `/api/sync/agents/:id/heartbeat` | Agent | Agent heartbeat |
 | DELETE | `/api/sync/agents/:id` | Admin | Remove agent |
@@ -127,7 +134,6 @@ Input validated with Zod schemas at the route level:
 | --- | --- |
 | Project ID | Lowercase alphanumeric and hyphens only (`^[a-z0-9-]+$`), 1-100 chars |
 | Project name | 1-100 characters, no control characters |
-| Local path | Absolute, no null bytes, no `..`, max 4096 chars |
 | Remote path | No null bytes, no `..`, max 4096 chars |
 | Provider type | One of: `spaces`, `s3`, `gcs`, `azure`, `b2`, `custom`, `local` |
 | Direction | One of: `push`, `pull`, `bidirectional` |
@@ -135,7 +141,7 @@ Input validated with Zod schemas at the route level:
 | Conflict strategy | One of: `newest-wins`, `local-wins`, `remote-wins`, `manual` |
 | Schedule | Valid 5-field cron expression (no seconds field) |
 | Encryption password | Minimum 12 characters |
-| Bandwidth limit | Valid rclone bwlimit format (e.g., `10M`, `500k`) |
+| Bandwidth limit | Valid rclone bwlimit format — integer or decimal with required unit suffix `k/K/m/M/g/G` (e.g., `10M`, `500k`, `1.5G`) |
 | Include/exclude patterns | 1-500 chars each, max 100 patterns, no null bytes, no rclone filter prefixes (`+`, `-`, `!`) |
 
 ## Quick Reference

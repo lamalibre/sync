@@ -44,7 +44,6 @@ export interface GlobalStatus {
 export interface Project {
   id: string;
   name: string;
-  localPath: string;
   remotePath: string;
   direction: SyncDirection;
   includes: string[];
@@ -56,10 +55,13 @@ export interface Project {
   trigger: SyncTrigger;
   watchDebounceMs: number;
   bandwidthLimit?: string;
+  softDelete?: { enabled: boolean; retentionDays: number; cleanupSchedule: string };
   status: ProjectStatus;
   lastSync: string | null;
   createdAt: string;
   updatedAt: string;
+  /** ISO timestamp when the project was soft-deleted, or null if active. */
+  deletedAt: string | null;
 }
 
 export interface ProjectListResponse {
@@ -181,7 +183,6 @@ export interface AgentResponse {
 
 export interface ProjectCreateInput {
   name: string;
-  localPath: string;
   remotePath?: string;
   direction?: SyncDirection;
   includes?: string[];
@@ -198,7 +199,6 @@ export interface ProjectCreateInput {
 
 export interface ProjectUpdateInput {
   name?: string;
-  localPath?: string;
   remotePath?: string;
   direction?: SyncDirection;
   includes?: string[];

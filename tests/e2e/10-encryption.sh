@@ -19,7 +19,6 @@ log_section "Create an encrypted project"
 
 ENCRYPT_CONFIG='{
   "name": "e2e-encrypted-project",
-  "localPath": "/tmp/sync-e2e-project-encrypted",
   "direction": "push",
   "encrypted": true,
   "encryptionPassword": "e2e-test-password-123456"
@@ -30,6 +29,28 @@ assert_json_field "$RESPONSE" '.ok' "true" "Encrypted project created"
 
 ENCRYPTED_PROJECT_ID=$(echo "$RESPONSE" | jq -r '.project.id')
 log_info "Encrypted project ID: $ENCRYPTED_PROJECT_ID"
+
+# Write the local path mapping to approved-paths.json on the agent VM
+agent_exec "cat > /root/.sync-agent/approved-paths.json << 'APEOF'
+{
+  \"version\": 1,
+  \"entries\": [
+    {
+      \"projectId\": \"e2e-test-project\",
+      \"localPath\": \"/tmp/sync-e2e-project\",
+      \"approvedAt\": \"2026-01-01T00:00:00.000Z\",
+      \"projectName\": \"e2e-test-project\"
+    },
+    {
+      \"projectId\": \"e2e-encrypted-project\",
+      \"localPath\": \"/tmp/sync-e2e-project-encrypted\",
+      \"approvedAt\": \"2026-01-01T00:00:00.000Z\",
+      \"projectName\": \"e2e-encrypted-project\"
+    }
+  ]
+}
+APEOF
+chmod 0600 /root/.sync-agent/approved-paths.json"
 
 # ---------------------------------------------------------------------------
 log_section "Create test files on agent"

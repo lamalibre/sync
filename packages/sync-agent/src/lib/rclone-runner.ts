@@ -15,6 +15,7 @@ import {
   DEFAULT_STATS_INTERVAL,
   DEFAULT_RETRIES,
   DEFAULT_LOW_LEVEL_RETRIES,
+  sanitizeRcloneError,
 } from '@lamalibre/sync-shared';
 import { createProgressParser } from './progress-parser.js';
 import {
@@ -29,6 +30,46 @@ import type {
   BisyncConflict,
   ConflictStrategy,
 } from './types.js';
+
+// sanitizeRcloneError is imported from @lamalibre/sync-shared above and
+// re-exported here so existing consumers (archive.ts, agent.ts) are not broken.
+export { sanitizeRcloneError };
+
+/**
+ * Build a minimal env for rclone child processes.
+ * Only passes through PATH and explicitly sets RCLONE_CONFIG.
+ * Avoids leaking parent environment variables like RCLONE_CONFIG_PASS.
+ */
+export function buildRcloneEnv(configPath: string): Record<string, string> {
+  return {
+    PATH: process.env['PATH'] ?? '',
+    HOME: process.env['HOME'] ?? '',
+    ...(process.env['TMPDIR'] ? { TMPDIR: process.env['TMPDIR'] } : {}),
+    RCLONE_CONFIG: configPath,
+  };
+}
+
+/**
+ * Build the include flags array from include patterns.
+ * Each pattern becomes a separate --include argument.
+ * When includes are present, rclone requires a trailing --exclude '*' to
+ * exclude everything not matched by an include rule.
+ */
+export function buildIncludeFlags(includes: readonly string[], logger?: Logger): string[] {
+  if (includes.length === 0) return [];
+  const flags: string[] = [];
+  for (const pattern of includes) {
+    if (pattern.includes('\0') || /^[+\-!]/.test(pattern)) {
+      logger?.warn({ pattern }, 'Skipping unsafe include pattern');
+      continue;
+    }
+    flags.push('--include', pattern);
+  }
+  if (flags.length > 0) {
+    flags.push('--exclude', '*');
+  }
+  return flags;
+}
 
 /**
  * Build the exclude flags array from exclude patterns.
@@ -114,8 +155,7 @@ function buildSyncEndpoints(options: RcloneSyncOptions): { source: string; desti
     case 'pull':
       return { source: remote, destination: options.localPath };
     case 'bidirectional':
-      // Bidirectional is handled by runRcloneBisync; if called here, fall through to push
-      return { source: options.localPath, destination: remote };
+      throw new Error('Bidirectional sync must use runRcloneBisync, not runRcloneSync');
   }
 }
 
@@ -146,8 +186,6 @@ export async function runRcloneSync(
     'sync',
     source,
     destination,
-    '--config',
-    options.rcloneConfigPath,
     '--progress',
     '--stats-one-line',
     '--stats',
@@ -160,6 +198,7 @@ export async function runRcloneSync(
     DEFAULT_RETRIES,
     '--low-level-retries',
     DEFAULT_LOW_LEVEL_RETRIES,
+    ...buildIncludeFlags(options.includes),
     ...buildExcludeFlags(options.excludes),
     ...buildBandwidthFlags(options.bandwidthLimit),
     ...(agentDir ? buildBackupDirFlags(options, agentDir) : []),
@@ -173,12 +212,10 @@ export async function runRcloneSync(
     const childProcess = execa('rclone', args, {
       cancelSignal: abortSignal,
       gracefulCancel: true,
-      // Do not pass credentials as CLI arguments;
-      // rclone reads them from the config file.
-      env: {
-        // Inherit parent env, only set RCLONE_CONFIG explicitly
-        RCLONE_CONFIG: options.rcloneConfigPath,
-      },
+      // Minimal env: only PATH, HOME, and RCLONE_CONFIG.
+      // Prevents leaking parent env vars like RCLONE_CONFIG_PASS.
+      env: buildRcloneEnv(options.rcloneConfigPath),
+      extendEnv: false,
       // We read stderr for progress; stdout may have other output
       stdout: 'pipe',
       stderr: 'pipe',
@@ -232,7 +269,7 @@ export async function runRcloneSync(
       };
     }
 
-    syncLogger.error({ err: errorMessage, durationMs }, 'rclone sync failed');
+    syncLogger.error({ err: sanitizeRcloneError(errorMessage), durationMs }, 'rclone sync failed');
 
     return {
       operationId: options.operationId,
@@ -242,7 +279,7 @@ export async function runRcloneSync(
       filesTransferred: lastProgress?.filesTransferred ?? 0,
       bytesTransferred: lastProgress?.bytesTransferred ?? 0,
       durationMs,
-      error: errorMessage,
+      error: sanitizeRcloneError(errorMessage),
     };
   }
 }
@@ -252,6 +289,214 @@ export async function runRcloneSync(
  */
 export function generateOperationId(): string {
   return randomUUID();
+}
+
+/**
+ * Run an rclone sync dry-run to preview what would change.
+ *
+ * Executes `rclone sync --dry-run -v` with the same arguments as a real sync,
+ * then returns the captured stderr output for parsing by `parseDryRunOutput()`.
+ */
+export async function runRcloneDryRun(
+  options: RcloneSyncOptions,
+  logger: Logger,
+  agentDir?: string,
+  abortSignal?: AbortSignal,
+): Promise<string> {
+  const syncLogger = logger.child({
+    component: 'rclone-dry-run',
+    operationId: options.operationId,
+    projectId: options.projectId,
+    direction: options.direction,
+  });
+
+  const { source, destination } = buildSyncEndpoints(options);
+
+  const args: string[] = [
+    'sync',
+    source,
+    destination,
+    '--dry-run',
+    '-v',
+    '--transfers',
+    DEFAULT_TRANSFERS,
+    '--checkers',
+    DEFAULT_CHECKERS,
+    '--retries',
+    DEFAULT_RETRIES,
+    '--low-level-retries',
+    DEFAULT_LOW_LEVEL_RETRIES,
+    ...buildIncludeFlags(options.includes),
+    ...buildExcludeFlags(options.excludes),
+  ];
+
+  syncLogger.info({ source, destination }, 'Starting rclone dry-run');
+
+  /** Bounded stderr collection. */
+  const MAX_LINES = 10_000;
+  const stderrLines: string[] = [];
+  let lineBuffer = '';
+
+  try {
+    const childProcess = execa('rclone', args, {
+      cancelSignal: abortSignal,
+      gracefulCancel: true,
+      env: buildRcloneEnv(options.rcloneConfigPath),
+      extendEnv: false,
+      stdout: 'pipe',
+      stderr: 'pipe',
+      timeout: 120_000, // 2 minute timeout for dry-run
+    });
+
+    if (childProcess.stderr) {
+      childProcess.stderr.on('data', (chunk: Buffer) => {
+        lineBuffer += chunk.toString('utf-8');
+        const lines = lineBuffer.split(/\r?\n/);
+        lineBuffer = lines.pop() ?? '';
+        for (const line of lines) {
+          if (stderrLines.length < MAX_LINES) {
+            stderrLines.push(line);
+          }
+        }
+      });
+    }
+
+    await childProcess;
+
+    // Flush remaining buffer
+    if (lineBuffer.length > 0 && stderrLines.length < MAX_LINES) {
+      stderrLines.push(lineBuffer);
+    }
+
+    syncLogger.info({ lineCount: stderrLines.length }, 'rclone dry-run completed');
+    return stderrLines.join('\n');
+  } catch (error: unknown) {
+    const errorMessage = sanitizeRcloneError(error instanceof Error ? error.message : String(error));
+    syncLogger.error({ err: errorMessage }, 'rclone dry-run failed');
+    throw new Error(errorMessage);
+  }
+}
+
+/**
+ * Run an rclone copy with --ignore-existing for protected pull mode.
+ *
+ * Downloads new files from remote without overwriting or deleting existing local files.
+ * Uses `rclone copy` (not sync) with `--ignore-existing` to ensure:
+ * - New remote files are downloaded
+ * - Existing local files are never overwritten
+ * - No local files are ever deleted
+ */
+export async function runRcloneProtectedPull(
+  options: Omit<RcloneSyncOptions, 'direction'>,
+  logger: Logger,
+  abortSignal?: AbortSignal,
+): Promise<SyncResult> {
+  const startTime = Date.now();
+  const syncLogger = logger.child({
+    component: 'rclone-runner',
+    operationId: options.operationId,
+    projectId: options.projectId,
+    direction: 'pull' as const,
+    mode: 'protected',
+  });
+
+  const remote = `${options.remoteName}:${options.bucket}/${options.remotePath}`;
+
+  const args: string[] = [
+    'copy',
+    remote,
+    options.localPath,
+    '--ignore-existing',
+    '--progress',
+    '--stats-one-line',
+    '--stats',
+    DEFAULT_STATS_INTERVAL,
+    '--transfers',
+    DEFAULT_TRANSFERS,
+    '--checkers',
+    DEFAULT_CHECKERS,
+    '--retries',
+    DEFAULT_RETRIES,
+    '--low-level-retries',
+    DEFAULT_LOW_LEVEL_RETRIES,
+    ...buildIncludeFlags(options.includes),
+    ...buildExcludeFlags(options.excludes),
+    ...buildBandwidthFlags(options.bandwidthLimit),
+  ];
+
+  syncLogger.info({ remote, localPath: options.localPath }, 'Starting rclone protected pull (copy --ignore-existing)');
+
+  let lastProgress: SyncProgress | undefined;
+
+  try {
+    const childProcess = execa('rclone', args, {
+      cancelSignal: abortSignal,
+      gracefulCancel: true,
+      env: buildRcloneEnv(options.rcloneConfigPath),
+      extendEnv: false,
+      stdout: 'pipe',
+      stderr: 'pipe',
+    });
+
+    if (childProcess.stderr) {
+      const parser = createProgressParser((progress) => {
+        lastProgress = progress;
+        options.onProgress?.(progress);
+      });
+
+      childProcess.stderr.on('data', (chunk: Buffer) => {
+        parser.feed(chunk.toString('utf-8'));
+      });
+    }
+
+    await childProcess;
+
+    const durationMs = Date.now() - startTime;
+    syncLogger.info(
+      { durationMs, filesTransferred: lastProgress?.filesTransferred ?? 0 },
+      'rclone protected pull completed successfully',
+    );
+
+    return {
+      operationId: options.operationId,
+      projectId: options.projectId,
+      direction: 'pull',
+      status: 'completed',
+      filesTransferred: lastProgress?.filesTransferred ?? 0,
+      bytesTransferred: lastProgress?.bytesTransferred ?? 0,
+      durationMs,
+    };
+  } catch (error: unknown) {
+    const durationMs = Date.now() - startTime;
+    const errorMessage = error instanceof Error ? error.message : String(error);
+
+    if (abortSignal?.aborted) {
+      syncLogger.info({ durationMs }, 'rclone protected pull was cancelled');
+      return {
+        operationId: options.operationId,
+        projectId: options.projectId,
+        direction: 'pull',
+        status: 'error',
+        filesTransferred: lastProgress?.filesTransferred ?? 0,
+        bytesTransferred: lastProgress?.bytesTransferred ?? 0,
+        durationMs,
+        error: 'Protected pull cancelled',
+      };
+    }
+
+    syncLogger.error({ err: sanitizeRcloneError(errorMessage), durationMs }, 'rclone protected pull failed');
+
+    return {
+      operationId: options.operationId,
+      projectId: options.projectId,
+      direction: 'pull',
+      status: 'error',
+      filesTransferred: lastProgress?.filesTransferred ?? 0,
+      bytesTransferred: lastProgress?.bytesTransferred ?? 0,
+      durationMs,
+      error: sanitizeRcloneError(errorMessage),
+    };
+  }
 }
 
 // ---------------------------------------------------------------------------
@@ -369,13 +614,12 @@ export async function runRcloneBisync(
     'bisync',
     options.localPath,
     remote,
-    '--config',
-    options.rcloneConfigPath,
     '--verbose',
     '--retries',
     DEFAULT_RETRIES,
     '--low-level-retries',
     DEFAULT_LOW_LEVEL_RETRIES,
+    ...buildIncludeFlags(options.includes),
     ...buildExcludeFlags(options.excludes),
     ...buildBandwidthFlags(options.bandwidthLimit),
     ...buildConflictFlags(options.conflictStrategy),
@@ -437,9 +681,8 @@ export async function runRcloneBisync(
     const childProcess = execa('rclone', args, {
       cancelSignal: abortSignal,
       gracefulCancel: true,
-      env: {
-        RCLONE_CONFIG: options.rcloneConfigPath,
-      },
+      env: buildRcloneEnv(options.rcloneConfigPath),
+      extendEnv: false,
       stdout: 'pipe',
       stderr: 'pipe',
     });
@@ -526,7 +769,7 @@ export async function runRcloneBisync(
     }
 
     syncLogger.error(
-      { err: errorMessage, durationMs, conflictCount: conflicts.length },
+      { err: sanitizeRcloneError(errorMessage), durationMs, conflictCount: conflicts.length },
       'rclone bisync failed',
     );
 
@@ -538,7 +781,7 @@ export async function runRcloneBisync(
       filesTransferred: lastProgress?.filesTransferred ?? 0,
       bytesTransferred: lastProgress?.bytesTransferred ?? 0,
       durationMs,
-      error: errorMessage,
+      error: sanitizeRcloneError(errorMessage),
       conflicts: conflicts.length > 0 ? conflicts : undefined,
     };
   }

@@ -11,6 +11,7 @@ import { execa } from 'execa';
 import type { Logger } from 'pino';
 import { isNodeError } from '@lamalibre/sync-shared';
 import { SYNC_TRASH_DIR, parseTrashTimestamp } from './trash-paths.js';
+import { buildRcloneEnv, sanitizeRcloneError } from './rclone-runner.js';
 
 export interface TrashCleanupOptions {
   readonly projectId: string;
@@ -84,11 +85,10 @@ export async function cleanupProjectTrash(
     const { stdout } = await execa('rclone', [
       'lsf',
       '--dirs-only',
-      '--config',
-      options.rcloneConfigPath,
       remoteTrashPrefix,
     ], {
-      env: { RCLONE_CONFIG: options.rcloneConfigPath },
+      env: buildRcloneEnv(options.rcloneConfigPath),
+      extendEnv: false,
       stdout: 'pipe',
       stderr: 'pipe',
     });
@@ -101,7 +101,7 @@ export async function cleanupProjectTrash(
       // Validate directory name: must be a pure timestamp with no path separators
       // or traversal sequences. This prevents a malicious remote directory from
       // causing rclone purge to target paths outside the project's trash scope.
-      if (name.includes('/') || name.includes('\\') || name.includes('..') || name.includes('\0')) {
+      if (name.includes('/') || name.includes('\\') || name.includes('..') || name.includes('\0') || name.includes(':')) {
         cleanupLogger.warn({ dir: name }, 'Skipping remote trash directory with unsafe name');
         continue;
       }
@@ -112,25 +112,24 @@ export async function cleanupProjectTrash(
       try {
         await execa('rclone', [
           'purge',
-          '--config',
-          options.rcloneConfigPath,
           `${remoteTrashPrefix}${name}/`,
         ], {
-          env: { RCLONE_CONFIG: options.rcloneConfigPath },
+          env: buildRcloneEnv(options.rcloneConfigPath),
+          extendEnv: false,
           stdout: 'pipe',
           stderr: 'pipe',
         });
         remoteDirsRemoved++;
       } catch (err: unknown) {
         cleanupLogger.warn(
-          { err: err instanceof Error ? err.message : String(err), dir: name },
+          { err: sanitizeRcloneError(err instanceof Error ? err.message : String(err)), dir: name },
           'Failed to purge remote trash directory',
         );
       }
     }
   } catch (err: unknown) {
     // rclone lsf fails if the directory doesn't exist — that's fine
-    const msg = err instanceof Error ? err.message : String(err);
+    const msg = sanitizeRcloneError(err instanceof Error ? err.message : String(err));
     if (!msg.includes('directory not found') && !msg.includes('not exist')) {
       cleanupLogger.warn(
         { err: msg },

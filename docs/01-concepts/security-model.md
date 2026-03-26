@@ -40,7 +40,7 @@ rclone credentials are never passed as CLI arguments. This is a critical rule:
 - **Arguments are visible** in process listings (`ps aux`, `/proc/<pid>/cmdline`)
 - **Config files are private** — written with mode 0600, readable only by the owner
 
-Sync writes an `rclone.conf` file with credentials, then passes `--config <path>` to rclone. The `RCLONE_CONFIG_PASS` environment variable is used for encrypted rclone configs.
+Sync writes an `rclone.conf` file with credentials, then passes `--config <path>` to rclone. The child process environment is explicitly sanitized to prevent leaking parent environment variables such as `RCLONE_CONFIG_PASS`. Sync operations receive `PATH`, `HOME`, and `RCLONE_CONFIG`, plus `TMPDIR` when it is set in the parent environment; utility commands like `rclone obscure` receive only `PATH` and `HOME`.
 
 #### 4. Path Validation
 
@@ -49,7 +49,16 @@ All path inputs are validated to prevent directory traversal:
 - No null bytes (`\0`)
 - No `..` segments after normalization
 - Maximum 4096 characters
-- `localPath` must be absolute (starts with `/`)
+- `remotePath` validated on the server side
+- Local path validation happens on the agent side only — local paths are stored in the agent's `approved-paths.json` and never sent to or stored on the server
+
+#### 4a. Local Path Allowlist
+
+Local paths are managed exclusively on the agent via `sync agent-approve`. The agent maintains an `approved-paths.json` file that maps project IDs to approved local directories. This design ensures:
+
+- Local filesystem paths never cross the network
+- Each agent independently controls which directories it exposes
+- The server cannot instruct an agent to read or write arbitrary local paths
 
 #### 5. File Permissions
 
@@ -106,7 +115,7 @@ Decryption reverses the process: unpack, derive key from salt, decrypt with GCM 
 
 ### Master Key
 
-- Random 32-byte hex string generated on first run
+- 64-character hex string (32 random bytes) generated on first run
 - Stored at `~/.sync/master.key` (server) and `~/.sync-agent/master.key` (agent)
 - Mode 0600
 - Never transmitted, never derived, never rotated
@@ -149,7 +158,8 @@ All REST inputs validated with Zod schemas at the route level:
 
 | Schema | Validates |
 | --- | --- |
-| Path fields | No null bytes, no `..`, max 4096 chars, absolute path |
+| Path fields (remote) | No null bytes, no `..`, max 4096 chars |
+| Path fields (local) | Validated on agent only — absolute, no null bytes, no `..`, max 4096 chars, must be in `approved-paths.json` |
 | Project name | 1-100 chars |
 | Project ID | Lowercase alphanumeric + hyphens only, 1-100 chars |
 | Provider type | One of: spaces, s3, gcs, azure, b2, custom, local |

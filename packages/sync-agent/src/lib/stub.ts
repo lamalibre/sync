@@ -10,7 +10,8 @@
  * summary metrics (totalSize, fileCount) and omit the per-file listing.
  */
 
-import { readFile, readdir, stat } from 'node:fs/promises';
+import { readFile, readdir, lstat } from 'node:fs/promises';
+import type { Stats } from 'node:fs';
 import { join, relative } from 'node:path';
 import { atomicWriteFile } from '@lamalibre/sync-shared';
 import type { ProviderType } from './types.js';
@@ -70,13 +71,16 @@ export interface ScanResult {
  * Skips the stub file itself and hidden files/directories that start with ".".
  * Uses streaming iteration (readdir) — does not hold the full tree in memory.
  */
+const MAX_SCAN_DEPTH = 100;
+
 export async function scanDirectory(localPath: string): Promise<ScanResult> {
   let totalSize = 0;
   let fileCount = 0;
   const files: StubFileEntry[] = [];
   const STAT_BATCH_SIZE = 50;
 
-  async function walk(dir: string): Promise<void> {
+  async function walk(dir: string, depth = 0): Promise<void> {
+    if (depth >= MAX_SCAN_DEPTH) return;
     const entries = await readdir(dir, { withFileTypes: true });
 
     // Separate directories and files for processing
@@ -93,7 +97,16 @@ export async function scanDirectory(localPath: string): Promise<ScanResult> {
 
       const fullPath = join(dir, entry.name);
       if (entry.isDirectory()) {
-        dirs.push(fullPath);
+        // Re-verify via lstat to defend against TOCTOU symlink swap
+        // between readdir and the recursive walk call.
+        try {
+          const st = await lstat(fullPath);
+          if (st.isDirectory() && !st.isSymbolicLink()) {
+            dirs.push(fullPath);
+          }
+        } catch {
+          // Directory vanished between readdir and lstat — skip it
+        }
       } else if (entry.isFile()) {
         fileEntries.push(fullPath);
       }
@@ -102,12 +115,17 @@ export async function scanDirectory(localPath: string): Promise<ScanResult> {
     // Stat files in batches for parallelism within each directory
     for (let i = 0; i < fileEntries.length; i += STAT_BATCH_SIZE) {
       const batch = fileEntries.slice(i, i + STAT_BATCH_SIZE);
-      const statResults = await Promise.all(
+      const statResults = (await Promise.all(
         batch.map(async (fullPath) => {
-          const fileStat = await stat(fullPath);
-          return { fullPath, fileStat };
+          try {
+            const fileStat = await lstat(fullPath);
+            return { fullPath, fileStat };
+          } catch {
+            // File vanished between readdir and stat (TOCTOU) — skip it
+            return null;
+          }
         }),
-      );
+      )).filter((r): r is { fullPath: string; fileStat: Stats } => r !== null);
 
       for (const { fullPath, fileStat } of statResults) {
         const relPath = relative(localPath, fullPath);
@@ -127,7 +145,7 @@ export async function scanDirectory(localPath: string): Promise<ScanResult> {
 
     // Recurse into subdirectories (sequentially to avoid overwhelming the OS)
     for (const subDir of dirs) {
-      await walk(subDir);
+      await walk(subDir, depth + 1);
     }
   }
 

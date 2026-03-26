@@ -22,7 +22,6 @@ Storage provider configuration with encrypted credentials.
     "provider": "spaces",
     "endpoint": "https://ams3.digitaloceanspaces.com",
     "bucket": "my-sync",
-    "region": null,
     "accessKeyEncrypted": "base64(salt||iv||authTag||ciphertext)",
     "secretKeyEncrypted": "base64(salt||iv||authTag||ciphertext)",
     "encryption": true,
@@ -49,7 +48,6 @@ Project definitions.
     {
       "id": "training-data",
       "name": "training-data",
-      "localPath": "/home/user/data/training",
       "remotePath": "projects/training-data",
       "direction": "bidirectional",
       "includes": [],
@@ -234,7 +232,8 @@ All JSON files use the shared `atomicWriteFile()` utility:
 
 ```javascript
 async function atomicWriteFile(filePath, data, mode) {
-  const tmpPath = filePath + '.tmp';
+  const dir = dirname(filePath);
+  const tmpPath = join(dir, `.tmp-${randomBytes(8).toString('hex')}`);
   await writeFile(tmpPath, data, { mode: mode ?? 0o644 });
   const fd = await open(tmpPath, 'r');
   await fd.sync();     // fsync ensures data reaches disk

@@ -87,13 +87,18 @@ curl -X POST http://localhost:9393/api/sync/projects \
   -H "Content-Type: application/json" \
   -d '{
     "name": "training-data",
-    "localPath": "/home/user/data/training",
     "direction": "bidirectional",
     "watch": true,
     "trigger": "watch+schedule",
     "schedule": "0 */6 * * *",
     "excludes": [".DS_Store", "*.tmp", "__pycache__"]
   }'
+```
+
+Then approve the project on the agent and set its local path:
+
+```bash
+sync agent-approve training-data --path /home/user/data/training
 ```
 
 This creates a project that:
@@ -178,6 +183,23 @@ sync restore
 
 # List projects
 sync projects
+
+# Approve a local path for sync on this agent
+sync agent-approve <project-id> --path /path/to/folder
+
+# Preview pending sync changes before applying
+sync preview
+
+# Soft-delete a project (recoverable)
+sync project-delete
+
+# Restore a soft-deleted project
+sync project-restore
+
+# List / purge / restore items in sync trash
+sync trash-list
+sync trash-purge
+sync trash-restore
 ```
 
 ## What's Next
@@ -187,3 +209,4 @@ sync projects
 - [Archiving Files](../02-guides/archiving-files.md) — the iCloud-style offload workflow
 - [Agent Enrollment](../02-guides/agent-enrollment.md) — sync files on remote machines
 - [Deployment Modes](../01-concepts/deployment-modes.md) — standalone vs Portlama plugin
+- [Deployment Use Cases](../02-guides/deployment-use-cases.md) — real-world deployment scenarios

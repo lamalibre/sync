@@ -16,14 +16,19 @@ curl -X POST http://localhost:9393/api/sync/projects \
   -H "Content-Type: application/json" \
   -d '{
     "name": "documents",
-    "localPath": "/home/user/Documents",
     "direction": "bidirectional",
     "watch": true,
     "trigger": "watch"
   }'
 ```
 
-This creates a project that watches `/home/user/Documents` and syncs bidirectionally whenever files change.
+Then, on each agent machine, approve the project and set its local path:
+
+```bash
+sync agent-approve documents --path /home/user/Documents
+```
+
+This creates a project that syncs bidirectionally whenever files change. The local path is stored only on the agent in `approved-paths.json` and never sent to the server.
 
 ### Full-Featured Project
 
@@ -33,7 +38,6 @@ curl -X POST http://localhost:9393/api/sync/projects \
   -H "Content-Type: application/json" \
   -d '{
     "name": "training-data",
-    "localPath": "/home/user/data/training",
     "remotePath": "projects/training",
     "direction": "bidirectional",
     "watch": true,
@@ -53,7 +57,6 @@ curl -X POST http://localhost:9393/api/sync/projects \
 | Field | Required | Default | Description |
 | --- | --- | --- | --- |
 | `name` | Yes | — | Project name (used as ID and default remote path) |
-| `localPath` | Yes | — | Absolute path to local directory |
 | `remotePath` | No | `projects/<id>` | Path within the cloud bucket |
 | `direction` | No | `push` | `push`, `pull`, or `bidirectional` |
 | `watch` | No | `false` | Enable file watching (chokidar) |

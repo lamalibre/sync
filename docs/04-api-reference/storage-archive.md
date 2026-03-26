@@ -18,14 +18,25 @@ Returns the current storage provider configuration. Credentials are redacted.
   "provider": "spaces",
   "endpoint": "https://ams3.digitaloceanspaces.com",
   "bucket": "my-sync",
-  "region": null,
+  "region": "ams3",
   "encryption": true,
   "lastTested": "2026-03-24T10:00:00.000Z",
   "testResult": "ok"
 }
 ```
 
-Credentials are omitted entirely from the response (not shown, not even redacted).
+The `region` field is included in the response; its value is `null` when not configured. Credentials are omitted entirely (not shown, not even redacted).
+
+**Response when not configured (200):**
+
+```json
+{
+  "configured": false,
+  "provider": null,
+  "lastTested": null,
+  "testResult": null
+}
+```
 
 ### Update Storage Config
 
@@ -85,6 +96,16 @@ Verifies the configured storage provider is accessible. Runs `rclone lsd` to lis
 #### `POST /api/sync/storage/create-bucket`
 
 Create the configured bucket if it does not exist. Runs `rclone mkdir`.
+
+**Request (optional):**
+
+```json
+{
+  "bucket": "custom-bucket-name"
+}
+```
+
+When omitted, uses the bucket name from the storage configuration.
 
 **Response (200):**
 
@@ -182,7 +203,7 @@ Aggregate archive savings across all projects.
 
 #### `GET /api/sync/agent-config`
 
-**Auth:** Agent with `sync:read` capability.
+**Auth:** Agent authentication (standalone: Bearer API key; plugin: mTLS with `sync:read` capability).
 
 Returns the full configuration an agent needs to operate, including decrypted storage credentials and project definitions with encryption passwords.
 
@@ -193,19 +214,18 @@ Returns the full configuration an agent needs to operate, including decrypted st
   "provider": {
     "type": "spaces",
     "bucket": "my-sync",
-    "region": null,
     "endpoint": "https://ams3.digitaloceanspaces.com",
     "accessKeyId": "<plaintext-key>",
     "secretAccessKey": "<plaintext-secret>",
-    "encryptionPassword": "<plaintext-password>"
+    "encryptionPassword": "<plaintext-password>  (only when at least one project uses encryption)"
   },
   "projects": [
     {
       "id": "training-data",
       "name": "training-data",
-      "localPath": "/home/user/data/training",
       "remotePath": "training-data",
       "direction": "bidirectional",
+      "includes": [],
       "excludes": [".DS_Store", "*.tmp"],
       "encrypted": true,
       "encryptionPassword": "<plaintext-project-password>",
@@ -215,19 +235,41 @@ Returns the full configuration an agent needs to operate, including decrypted st
       "bandwidthLimit": "10M",
       "conflictStrategy": "newest-wins",
       "trigger": "watch+schedule",
-      "watchDebounceMs": 5000
+      "watchDebounceMs": 5000,
+      "softDelete": {
+        "enabled": true,
+        "retentionDays": 90,
+        "cleanupSchedule": "0 3 * * *"
+      }
     }
-  ]
+  ],
+  "softDelete": {
+    "enabled": true,
+    "retentionDays": 90,
+    "cleanupSchedule": "0 3 * * *"
+  }
 }
 ```
 
-Note: This is the only endpoint that returns plaintext credentials. It is protected by agent authentication.
+Optional fields are omitted when unset (e.g., `region`, `bandwidthLimit`). Fields like `schedule` are sent as `null` when not configured. Each project object also includes conditional fields when a server-initiated operation is pending: `pendingOperationId`, `pendingType`, and optionally `pendingDirection`.
+
+**Note:** Credential field names in the `provider` object are provider-specific:
+
+| Provider | Fields |
+| --- | --- |
+| `spaces`, `s3`, `custom` | `accessKeyId`, `secretAccessKey` |
+| `gcs` | `serviceAccountKey` |
+| `azure` | `storageAccountName`, `storageAccountKey` |
+| `b2` | `applicationKeyId`, `applicationKey` |
+| `local` | *(no credentials)* |
+
+This is the only endpoint that returns plaintext credentials. It is protected by agent authentication.
 
 ### Report Operation Result
 
 #### `POST /api/sync/agent-report`
 
-**Auth:** Agent with `sync:write` capability.
+**Auth:** Agent authentication (standalone: Bearer API key; plugin: mTLS with `sync:write` capability).
 
 Report the result of a sync, archive, or restore operation.
 
@@ -245,13 +287,16 @@ Report the result of a sync, archive, or restore operation.
   "filesTransferred": 42,
   "duration": 45,
   "errors": 0,
-  "errorMessage": null,
   "conflicts": [],
   "spaceFreed": 0,
   "totalSize": 104857600,
-  "fileCount": 42
+  "fileCount": 42,
+  "localSize": 104857600,
+  "remoteSize": 104857600
 }
 ```
+
+All fields except `operationId`, `projectId`, and `status` are optional. The `direction`, `type`, `trigger`, `localSize`, and `remoteSize` fields provide additional context when available.
 
 **Response (200):**
 

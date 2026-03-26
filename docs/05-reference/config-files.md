@@ -24,6 +24,8 @@ Directory mode: `0700`
 | `rclone.conf` | `0600` | Generated rclone config (provider credentials, crypt overlays) |
 | `master.key` | `0600` | Agent encryption key (32-byte hex, generated once) |
 | `sync-state.json` | `0600` | Per-project sync tracking (last sync time, bisync baseline) |
+| `approved-paths.json` | `0600` | Project-to-local-path mapping (set via `sync agent-approve`) |
+| `pending-syncs/` | `0700` | Dry-run preview files for sync confirm mode (auto-expires after 1 hour) |
 
 Directory mode: `0700`
 
@@ -52,7 +54,7 @@ Directory mode: `0700`
 
 ## Write Patterns
 
-All JSON state files use **atomic writes**: write to `<file>.tmp`, fsync, then rename into place. This ensures that a crash mid-write never corrupts the file.
+All JSON state files use **atomic writes**: write to a random temp file (`.tmp-<hex>`), fsync, then rename into place. This ensures that a crash mid-write never corrupts the file.
 
 ## Related Documentation
 

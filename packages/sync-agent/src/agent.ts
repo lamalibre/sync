@@ -13,9 +13,24 @@
  * - Handles graceful shutdown (watchers, schedulers, active syncs)
  */
 
-import { stat } from 'node:fs/promises';
+import { lstat } from 'node:fs/promises';
+import { posix } from 'node:path';
 import { hostname, type, release } from 'node:os';
 import type { Logger } from 'pino';
+import {
+  readApprovedPaths,
+  writeApprovedPaths,
+  getLocalPath,
+  hasApprovedPath,
+  getUnmappedProjects,
+  pruneStaleApprovals,
+  getAccessMode,
+  getConfirmMode,
+  getDeleteThreshold,
+  type ApprovedPathsFile,
+  type AccessMode,
+  type ProjectInfo,
+} from '@lamalibre/sync-shared';
 import { ServerClient } from './lib/server-client.js';
 import {
   ensureAgentDir,
@@ -36,7 +51,16 @@ import {
   getProjectRemoteName,
   buildCryptRemoteMap,
 } from './lib/rclone-config.js';
-import { runRcloneSync, runRcloneBisync, generateOperationId } from './lib/rclone-runner.js';
+import { runRcloneSync, runRcloneBisync, runRcloneDryRun, runRcloneProtectedPull, generateOperationId, sanitizeRcloneError } from './lib/rclone-runner.js';
+import {
+  readPendingSync,
+  removePendingSync,
+  savePendingSync,
+  cleanExpiredPendingSyncs,
+  buildPendingSyncPreview,
+  listPendingSyncs,
+} from './lib/pending-sync.js';
+import { parseDryRunOutput } from './lib/dry-run-parser.js';
 import { cleanupProjectTrash } from './lib/trash-cleanup.js';
 import { runArchive, runRestore, type ArchiveResult, type RestoreResult } from './lib/archive.js';
 import { readStub } from './lib/stub.js';
@@ -87,6 +111,9 @@ export class Agent {
   /** Mapping from encryption passwords to crypt remote names. */
   private cryptRemoteMap = new Map<string, string>();
 
+  /** Persistent allowlist of approved (projectId, localPath) pairs. */
+  private approvedPaths: ApprovedPathsFile = { version: 1, entries: [] };
+
   /** Cron scheduler for periodic syncs. */
   private scheduler: Scheduler | null = null;
 
@@ -123,6 +150,9 @@ export class Agent {
 
     // Ensure agent directory exists with proper permissions
     await ensureAgentDir(this.agentDir);
+
+    // Load path allowlist (must happen before any sync operations)
+    this.approvedPaths = await readApprovedPaths(this.agentDir, (err) => this.logger.warn({ err: err.message }, 'Failed to read approved-paths.json'));
 
     // Load agent settings (file or env vars)
     this.settings = await readAgentSettings(this.agentDir, this.logger);
@@ -263,9 +293,10 @@ export class Agent {
             resolve();
           }
         }, 100);
-        // Don't wait forever
+        // Don't wait forever — force-clear leaked entries on timeout
         setTimeout(() => {
           clearInterval(checkInterval);
+          this.activeSyncs.clear();
           resolve();
         }, 5_000);
       });
@@ -279,12 +310,267 @@ export class Agent {
   // ---------------------------------------------------------------------------
 
   /**
+   * Resolve the local path for a project from the approved-paths mapping.
+   * Returns null if no mapping exists for this project.
+   */
+  private resolveLocalPath(projectId: string): string | null {
+    return getLocalPath(this.approvedPaths, projectId);
+  }
+
+  /**
+   * Resolve the effective sync direction after applying the access mode override.
+   * Returns null if the access mode blocks the operation entirely.
+   */
+  private resolveEffectiveDirection(
+    requestedDirection: SyncDirection,
+    accessMode: AccessMode,
+    projectId: string,
+  ): SyncDirection | null {
+    switch (accessMode) {
+      case 'full':
+        return requestedDirection;
+
+      case 'push-only':
+        if (requestedDirection === 'pull') {
+          this.logger.info(
+            { projectId, accessMode },
+            'Access mode "push-only" blocks pull direction, skipping sync',
+          );
+          return null;
+        }
+        if (requestedDirection === 'bidirectional') {
+          this.logger.info(
+            { projectId, accessMode },
+            'Access mode "push-only" overriding bidirectional to push',
+          );
+          return 'push';
+        }
+        return requestedDirection;
+
+      case 'pull-only':
+        if (requestedDirection === 'push') {
+          this.logger.info(
+            { projectId, accessMode },
+            'Access mode "pull-only" blocks push direction, skipping sync',
+          );
+          return null;
+        }
+        if (requestedDirection === 'bidirectional') {
+          this.logger.info(
+            { projectId, accessMode },
+            'Access mode "pull-only" overriding bidirectional to pull',
+          );
+          return 'pull';
+        }
+        return requestedDirection;
+
+      case 'protected':
+        // Protected mode uses rclone copy --ignore-existing (no overwrites, no deletes).
+        // Handled separately via triggerProtectedPull; 'pull' is a sentinel value.
+        if (requestedDirection !== 'pull') {
+          this.logger.info(
+            { projectId, accessMode, requestedDirection },
+            'Access mode "protected" overriding direction to protected pull (copy --ignore-existing)',
+          );
+        }
+        return 'pull';
+    }
+  }
+
+  /**
+   * Execute a protected pull (rclone copy --ignore-existing).
+   * Downloads new files without overwriting or deleting existing local files.
+   */
+  private async triggerProtectedPull(
+    project: ProjectDefinition,
+    localPath: string,
+    operationId: string,
+    trigger: 'manual' | 'watch' | 'schedule',
+  ): Promise<string | null> {
+    if (!this.currentConfig) return null;
+
+    const abortController = new AbortController();
+    const activeSync: ActiveSync = {
+      operationId,
+      projectId: project.id,
+      abortController,
+      startedAt: Date.now(),
+      trigger,
+    };
+    this.activeSyncs.set(project.id, activeSync);
+
+    const remoteName = getProjectRemoteName(
+      project,
+      this.currentConfig.provider,
+      this.cryptRemoteMap,
+    );
+    const bandwidthLimit = project.bandwidthLimit ?? this.currentConfig.defaultBandwidthLimit;
+
+    void this.executeProtectedPullOperation(
+      {
+        operationId,
+        projectId: project.id,
+        localPath,
+        remotePath: project.remotePath,
+        rcloneConfigPath: getRcloneConfigPath(this.agentDir),
+        remoteName,
+        bucket: this.currentConfig.provider.bucket,
+        includes: project.includes,
+        excludes: project.excludes,
+        bandwidthLimit,
+        softDelete: project.softDelete,
+        onProgress: (progress) => {
+          this.logger.debug(
+            { projectId: project.id, operationId, percentage: progress.percentage },
+            'Protected pull progress',
+          );
+        },
+      },
+      abortController.signal,
+      trigger,
+    );
+
+    return operationId;
+  }
+
+  /**
+   * Check whether a sync needs a dry-run preview before execution.
+   * Returns:
+   *   'proceed'  — no preview needed, proceed with sync
+   *   'waiting'  — preview was just created, waiting for approval
+   *   'pending'  — a preview already exists and is waiting for approval
+   */
+  private async checkSyncPreview(
+    project: ProjectDefinition,
+    localPath: string,
+    effectiveDirection: SyncDirection,
+    operationId: string,
+    trigger: 'manual' | 'watch' | 'schedule',
+  ): Promise<'proceed' | 'waiting' | 'pending'> {
+    if (!this.currentConfig) return 'proceed';
+
+    const confirmMode = getConfirmMode(this.approvedPaths, project.id, project.direction);
+
+    // Auto mode: no preview needed
+    if (confirmMode === 'auto') {
+      // Still check for an approved pending sync (from a previous confirm-mode change)
+      const existing = await readPendingSync(this.agentDir, project.id);
+      if (existing?.status === 'approved') {
+        await removePendingSync(this.agentDir, project.id);
+      }
+      return 'proceed';
+    }
+
+    // Bidirectional (bisync) does not support dry-run preview because
+    // bisync --dry-run produces a different output format than sync --dry-run,
+    // and the dry-run parser cannot reliably extract changes from it.
+    // Allow bisync operations to proceed without preview.
+    if (effectiveDirection === 'bidirectional') {
+      this.logger.warn(
+        { projectId: project.id },
+        'Sync preview is not supported for bidirectional syncs (bisync --dry-run output format differs). Proceeding without preview.',
+      );
+      return 'proceed';
+    }
+
+    // Check for existing pending sync
+    const existing = await readPendingSync(this.agentDir, project.id);
+    if (existing?.status === 'approved') {
+      await removePendingSync(this.agentDir, project.id);
+      return 'proceed';
+    }
+    if (existing?.status === 'pending') {
+      this.logger.info(
+        { projectId: project.id },
+        'Pending sync preview awaiting approval, skipping sync',
+      );
+      return 'pending';
+    }
+
+    // Need to evaluate via dry-run
+    try {
+      const remoteName = getProjectRemoteName(
+        project,
+        this.currentConfig.provider,
+        this.cryptRemoteMap,
+      );
+
+      const dryRunOutput = await runRcloneDryRun(
+        {
+          operationId,
+          projectId: project.id,
+          direction: effectiveDirection,
+          localPath,
+          remotePath: project.remotePath,
+          rcloneConfigPath: getRcloneConfigPath(this.agentDir),
+          remoteName,
+          bucket: this.currentConfig.provider.bucket,
+          includes: project.includes,
+          excludes: project.excludes,
+        },
+        this.logger,
+        this.agentDir,
+      );
+
+      const changes = parseDryRunOutput(dryRunOutput);
+      const deleteCount = changes.filter((c) => c.action === 'delete').length;
+
+      // Decide whether confirmation is needed
+      const needsConfirmation =
+        confirmMode === 'confirm-always' ||
+        (confirmMode === 'confirm-destructive' && deleteCount > getDeleteThreshold(this.approvedPaths, project.id));
+
+      if (!needsConfirmation) {
+        return 'proceed';
+      }
+
+      // Save pending sync preview
+      const preview = buildPendingSyncPreview(
+        project.id,
+        project.name,
+        operationId,
+        effectiveDirection,
+        localPath,
+        project.remotePath,
+        trigger,
+        changes,
+      );
+      await savePendingSync(this.agentDir, preview);
+
+      this.logger.warn(
+        {
+          projectId: project.id,
+          copyCount: preview.copyCount,
+          deleteCount: preview.deleteCount,
+        },
+        'Sync requires confirmation. Run "sync preview" to review and approve.',
+      );
+      return 'waiting';
+    } catch (err: unknown) {
+      // When the user has opted into confirmation mode, a dry-run failure
+      // must NOT silently proceed — that would bypass the safety contract.
+      // Skip this sync cycle; the next poll will retry the dry-run.
+      this.logger.error(
+        { projectId: project.id, confirmMode, err: err instanceof Error ? err.message : String(err) },
+        'Dry-run failed — skipping sync (confirm mode requires a successful preview before execution).',
+      );
+      return 'waiting';
+    }
+  }
+
+  /**
    * Validate that a local path exists, is a directory, and is owned by the
    * current user. Returns true if valid, false otherwise (with a warning log).
    */
   private async validateLocalPath(localPath: string): Promise<boolean> {
     try {
-      const st = await stat(localPath);
+      // lstat does not follow symlinks, so isDirectory() is only true for
+      // real directories (not symlinks pointing to directories).
+      const st = await lstat(localPath);
+      if (st.isSymbolicLink()) {
+        this.logger.warn({ localPath }, 'localPath is a symbolic link, skipping');
+        return false;
+      }
       if (!st.isDirectory()) {
         this.logger.warn({ localPath }, 'localPath is not a directory, skipping');
         return false;
@@ -313,6 +599,7 @@ export class Agent {
     direction?: SyncDirection,
     trigger: 'manual' | 'watch' | 'schedule' = 'manual',
     pendingOperationId?: string,
+    skipPreview = false,
   ): Promise<string | null> {
     if (!this.currentConfig) {
       this.logger.warn('Cannot trigger sync: no config loaded');
@@ -331,13 +618,54 @@ export class Agent {
       return null;
     }
 
+    // Resolve local path from approved-paths mapping
+    const localPath = this.resolveLocalPath(projectId);
+    if (!localPath) {
+      this.logger.warn(
+        { projectId, projectName: project.name },
+        'No local path configured for project. Run "sync agent-approve" to set a local path.',
+      );
+      return null;
+    }
+
     // Validate local path before starting sync
-    if (!(await this.validateLocalPath(project.localPath))) {
+    if (!(await this.validateLocalPath(localPath))) {
       return null;
     }
 
     const operationId = pendingOperationId ?? generateOperationId();
-    const syncDirection = direction ?? project.direction;
+
+    // --- Access mode enforcement ---
+    const accessMode = getAccessMode(this.approvedPaths, projectId);
+    const effectiveDirection = this.resolveEffectiveDirection(
+      direction ?? project.direction,
+      accessMode,
+      projectId,
+    );
+
+    if (!effectiveDirection) {
+      // Access mode blocks this direction entirely
+      return null;
+    }
+
+    // --- Protected mode: use rclone copy --ignore-existing ---
+    if (accessMode === 'protected') {
+      return this.triggerProtectedPull(project, localPath, operationId, trigger);
+    }
+
+    // --- Sync preview / dry-run decision ---
+    if (!skipPreview) {
+      const previewResult = await this.checkSyncPreview(
+        project, localPath, effectiveDirection, operationId, trigger,
+      );
+      if (previewResult === 'waiting') {
+        return null; // Pending sync saved, waiting for approval
+      }
+      if (previewResult === 'pending') {
+        return null; // Already a pending preview waiting
+      }
+      // previewResult === 'proceed' — continue with sync
+    }
 
     const abortController = new AbortController();
     const activeSync: ActiveSync = {
@@ -360,16 +688,17 @@ export class Agent {
     const bandwidthLimit = project.bandwidthLimit ?? this.currentConfig.defaultBandwidthLimit;
 
     // Handle bidirectional sync via bisync
-    if (syncDirection === 'bidirectional') {
+    if (effectiveDirection === 'bidirectional') {
       void this.executeBisyncOperation(
         {
           operationId,
           projectId,
-          localPath: project.localPath,
+          localPath,
           remotePath: project.remotePath,
           rcloneConfigPath: getRcloneConfigPath(this.agentDir),
           remoteName,
           bucket: this.currentConfig.provider.bucket,
+          includes: project.includes,
           excludes: project.excludes,
           bandwidthLimit,
           resync: false, // Will be overridden by executeBisyncOperation based on state
@@ -391,12 +720,13 @@ export class Agent {
         {
           operationId,
           projectId,
-          direction: syncDirection,
-          localPath: project.localPath,
+          direction: effectiveDirection,
+          localPath,
           remotePath: project.remotePath,
           rcloneConfigPath: getRcloneConfigPath(this.agentDir),
           remoteName,
           bucket: this.currentConfig.provider.bucket,
+          includes: project.includes,
           excludes: project.excludes,
           bandwidthLimit,
           softDelete: project.softDelete,
@@ -436,8 +766,18 @@ export class Agent {
       return null;
     }
 
+    // Resolve local path from approved-paths mapping
+    const localPath = this.resolveLocalPath(projectId);
+    if (!localPath) {
+      this.logger.warn(
+        { projectId, projectName: project.name },
+        'No local path configured for project. Run "sync agent-approve" to set a local path.',
+      );
+      return null;
+    }
+
     // Validate local path before starting archive
-    if (!(await this.validateLocalPath(project.localPath))) {
+    if (!(await this.validateLocalPath(localPath))) {
       return null;
     }
 
@@ -465,12 +805,13 @@ export class Agent {
       {
         operationId,
         projectId,
-        localPath: project.localPath,
+        localPath,
         remotePath: project.remotePath,
         rcloneConfigPath: getRcloneConfigPath(this.agentDir),
         remoteName,
         bucket: this.currentConfig.provider.bucket,
         provider: this.currentConfig.provider.type,
+        includes: project.includes,
         excludes: project.excludes,
         bandwidthLimit,
         softDelete: project.softDelete,
@@ -509,18 +850,35 @@ export class Agent {
       return null;
     }
 
+    // Resolve local path from approved-paths mapping
+    const localPath = this.resolveLocalPath(projectId);
+    if (!localPath) {
+      this.logger.warn(
+        { projectId, projectName: project.name },
+        'No local path configured for project. Run "sync agent-approve" to set a local path.',
+      );
+      return null;
+    }
+
     // Defense in depth: validate singleFilePath before passing to rclone
     if (singleFilePath) {
-      if (singleFilePath.includes('\0') || singleFilePath.split('/').includes('..')) {
+      if (singleFilePath.length > 4096) {
+        throw new Error('File path must be at most 4096 characters');
+      }
+      const normalizedFilePath = posix.normalize(singleFilePath);
+      const segments = normalizedFilePath.split('/').filter(Boolean);
+      if (singleFilePath.includes('\0') || segments.includes('..') || normalizedFilePath.startsWith('/')) {
         throw new Error('Invalid file path for restore');
       }
-      if (/[*?[{\]\\}]/.test(singleFilePath)) {
+      if (/[*?\[{}\]\\]/.test(normalizedFilePath)) {
         throw new Error('File path must not contain glob metacharacters (*, ?, [, ], {, }, \\)');
       }
+      // Use normalized form for rclone to prevent path interpretation differences
+      singleFilePath = normalizedFilePath;
     }
 
     // Verify that a stub file exists
-    const stub = await readStub(project.localPath);
+    const stub = await readStub(localPath);
     if (!stub) {
       this.logger.warn({ projectId }, 'No stub file found — project may not be archived');
       return null;
@@ -550,7 +908,7 @@ export class Agent {
       {
         operationId,
         projectId,
-        localPath: project.localPath,
+        localPath,
         rcloneConfigPath: getRcloneConfigPath(this.agentDir),
         remoteName,
         bucket: this.currentConfig.provider.bucket,
@@ -701,6 +1059,28 @@ export class Agent {
   private async pollConfig(): Promise<void> {
     if (!this.serverClient) return;
 
+    // Reload approved paths every poll so access/confirm mode changes are
+    // picked up immediately, not only when the server config changes.
+    try {
+      this.approvedPaths = await readApprovedPaths(this.agentDir, (err) => this.logger.warn({ err: err.message }, 'Failed to read approved-paths.json'));
+    } catch (err: unknown) {
+      this.logger.warn(
+        { err: err instanceof Error ? err.message : String(err) },
+        'Failed to reload approved paths',
+      );
+    }
+
+    // Clean up expired/rejected pending syncs and process approved ones
+    try {
+      await cleanExpiredPendingSyncs(this.agentDir);
+      await this.processApprovedPendingSyncs();
+    } catch (err: unknown) {
+      this.logger.warn(
+        { err: err instanceof Error ? err.message : String(err) },
+        'Failed to process pending syncs',
+      );
+    }
+
     try {
       const newConfig = await this.serverClient.fetchConfig();
       const configChanged = !configsEqual(this.currentConfig, newConfig);
@@ -723,9 +1103,74 @@ export class Agent {
   }
 
   /**
+   * Check for approved pending syncs and execute them.
+   */
+  private async processApprovedPendingSyncs(): Promise<void> {
+    if (!this.currentConfig) return;
+
+    const pendingSyncs = await listPendingSyncs(this.agentDir);
+
+    for (const preview of pendingSyncs) {
+      // Clean up expired syncs regardless of status
+      if (new Date(preview.expiresAt).getTime() < Date.now()) {
+        await removePendingSync(this.agentDir, preview.projectId);
+        continue;
+      }
+      if (preview.status !== 'approved') continue;
+      if (this.activeSyncs.has(preview.projectId)) continue;
+
+      const project = this.currentConfig.projects.find((p) => p.id === preview.projectId);
+      if (!project) {
+        await removePendingSync(this.agentDir, preview.projectId);
+        continue;
+      }
+
+      this.logger.info(
+        { projectId: preview.projectId, operationId: preview.operationId },
+        'Executing approved pending sync',
+      );
+
+      try {
+        const opId = await this.triggerSync(project.id, preview.direction, preview.trigger, preview.operationId, true);
+        if (opId) {
+          await removePendingSync(this.agentDir, preview.projectId);
+        } else {
+          this.logger.warn(
+            { projectId: preview.projectId },
+            'Approved sync could not start (blocked by access mode, missing path, or active sync). Pending sync preserved for retry.',
+          );
+        }
+      } catch (err: unknown) {
+        this.logger.error({ projectId: preview.projectId, err: err instanceof Error ? err.message : String(err) }, 'Failed to execute approved sync');
+      }
+    }
+  }
+
+  /**
    * Apply a new config — regenerate rclone.conf, update watchers and schedules.
    */
   private async applyConfig(config: AgentConfig): Promise<void> {
+    // Reload approved paths (may have been updated by CLI since last poll)
+    this.approvedPaths = await readApprovedPaths(this.agentDir, (err) => this.logger.warn({ err: err.message }, 'Failed to read approved-paths.json'));
+
+    // Log warnings for projects without local path mappings
+    const projectInfos: readonly ProjectInfo[] = config.projects.map((p) => ({ id: p.id, name: p.name }));
+    const unmapped = getUnmappedProjects(this.approvedPaths, projectInfos);
+    for (const project of unmapped) {
+      this.logger.warn(
+        { projectId: project.id, projectName: project.name },
+        'Project has no local path mapping — sync blocked. Run "sync agent-approve" to set a local path.',
+      );
+    }
+
+    // Prune stale approvals for projects no longer in config
+    const activeIds = new Set(config.projects.map((p) => p.id));
+    const pruned = pruneStaleApprovals(this.approvedPaths, activeIds);
+    if (pruned.entries.length !== this.approvedPaths.entries.length) {
+      this.approvedPaths = pruned;
+      await writeApprovedPaths(this.agentDir, pruned);
+    }
+
     // Build the crypt remote map for per-project encryption passwords
     this.cryptRemoteMap = buildCryptRemoteMap(config.projects, config.provider);
 
@@ -745,6 +1190,15 @@ export class Agent {
     // that the agent isn't already running an operation for.
     for (const project of config.projects) {
       if (project.status === 'syncing' && !this.activeSyncs.has(project.id)) {
+        // Skip if no local path mapping — the trigger methods will log a warning
+        if (!hasApprovedPath(this.approvedPaths, project.id)) {
+          this.logger.warn(
+            { projectId: project.id },
+            'Skipping server-initiated operation: no local path configured',
+          );
+          continue;
+        }
+
         const opType = project.pendingType ?? 'sync';
         this.logger.info(
           { projectId: project.id, pendingOperationId: project.pendingOperationId, pendingDirection: project.pendingDirection, pendingType: opType },
@@ -800,8 +1254,12 @@ export class Agent {
 
   /**
    * Determine whether a project needs a file watcher.
+   * Returns false if the project's path is not approved.
    */
   private projectNeedsWatcher(project: ProjectDefinition): boolean {
+    // Never watch projects without an approved local path mapping
+    if (!hasApprovedPath(this.approvedPaths, project.id)) return false;
+
     // Explicit watch flag
     if (project.watch) return true;
 
@@ -816,14 +1274,24 @@ export class Agent {
    * Start a file watcher for a project.
    */
   private startWatcher(project: ProjectDefinition): void {
+    const localPath = this.resolveLocalPath(project.id);
+    if (!localPath) {
+      this.logger.warn(
+        { projectId: project.id, projectName: project.name },
+        'No local path configured for project. Run "sync agent-approve" to set a local path.',
+      );
+      return;
+    }
+
     this.logger.info(
-      { projectId: project.id, localPath: project.localPath },
+      { projectId: project.id, localPath },
       'Starting file watcher for project',
     );
 
     const watcher = new FileWatcher({
       projectId: project.id,
-      localPath: project.localPath,
+      localPath,
+      includes: project.includes,
       excludes: project.excludes,
       debounceMs: project.watchDebounceMs,
       onChanges: (projectId: string, changedFiles: readonly string[]) => {
@@ -981,9 +1449,13 @@ export class Agent {
 
   /**
    * Determine whether a project needs cron scheduling.
+   * Returns false if the project's path is not approved.
    */
   private projectNeedsSchedule(project: ProjectDefinition): boolean {
     if (!project.schedule) return false;
+
+    // Never schedule projects without an approved local path mapping
+    if (!hasApprovedPath(this.approvedPaths, project.id)) return false;
 
     const trigger = project.trigger;
 
@@ -1006,7 +1478,14 @@ export class Agent {
       return;
     }
 
-    await this.triggerSync(projectId, undefined, 'schedule');
+    try {
+      await this.triggerSync(projectId, undefined, 'schedule');
+    } catch (err: unknown) {
+      this.logger.error(
+        { projectId, err: err instanceof Error ? err.message : String(err) },
+        'Scheduled sync failed',
+      );
+    }
   }
 
   // ---------------------------------------------------------------------------
@@ -1034,7 +1513,38 @@ export class Agent {
         filesTransferred: 0,
         bytesTransferred: 0,
         durationMs: Date.now() - (this.activeSyncs.get(options.projectId)?.startedAt ?? Date.now()),
-        error: error instanceof Error ? error.message : String(error),
+        error: sanitizeRcloneError(error instanceof Error ? error.message : String(error)),
+      };
+    } finally {
+      this.activeSyncs.delete(options.projectId);
+    }
+
+    await this.reportSyncResult(result, trigger);
+    this.processPendingSync(options.projectId);
+  }
+
+  /**
+   * Execute a protected pull operation (rclone copy --ignore-existing) and report.
+   */
+  private async executeProtectedPullOperation(
+    options: Parameters<typeof runRcloneProtectedPull>[0],
+    abortSignal: AbortSignal,
+    trigger: 'manual' | 'watch' | 'schedule',
+  ): Promise<void> {
+    let result: SyncResult;
+
+    try {
+      result = await runRcloneProtectedPull(options, this.logger, abortSignal);
+    } catch (error: unknown) {
+      result = {
+        operationId: options.operationId,
+        projectId: options.projectId,
+        direction: 'pull',
+        status: 'error',
+        filesTransferred: 0,
+        bytesTransferred: 0,
+        durationMs: Date.now() - (this.activeSyncs.get(options.projectId)?.startedAt ?? Date.now()),
+        error: sanitizeRcloneError(error instanceof Error ? error.message : String(error)),
       };
     } finally {
       this.activeSyncs.delete(options.projectId);
@@ -1080,7 +1590,7 @@ export class Agent {
         filesTransferred: 0,
         bytesTransferred: 0,
         durationMs: Date.now() - (this.activeSyncs.get(options.projectId)?.startedAt ?? Date.now()),
-        error: error instanceof Error ? error.message : String(error),
+        error: sanitizeRcloneError(error instanceof Error ? error.message : String(error)),
       };
     } finally {
       this.activeSyncs.delete(options.projectId);
@@ -1127,7 +1637,7 @@ export class Agent {
         fileCount: 0,
         spaceFreed: 0,
         durationMs: Date.now() - (this.activeSyncs.get(options.projectId)?.startedAt ?? Date.now()),
-        error: error instanceof Error ? error.message : String(error),
+        error: sanitizeRcloneError(error instanceof Error ? error.message : String(error)),
       };
     } finally {
       this.activeSyncs.delete(options.projectId);
@@ -1144,7 +1654,7 @@ export class Agent {
           filesTransferred: result.fileCount,
           bytesTransferred: result.totalSize,
           duration: result.durationMs,
-          error: result.error,
+          error: result.error ? sanitizeRcloneError(result.error) : undefined,
           type: 'archive',
           spaceFreed: result.spaceFreed,
           totalSize: result.totalSize,
@@ -1181,7 +1691,7 @@ export class Agent {
         filesRestored: 0,
         bytesRestored: 0,
         durationMs: Date.now() - (this.activeSyncs.get(options.projectId)?.startedAt ?? Date.now()),
-        error: error instanceof Error ? error.message : String(error),
+        error: sanitizeRcloneError(error instanceof Error ? error.message : String(error)),
       };
     } finally {
       this.activeSyncs.delete(options.projectId);
@@ -1198,7 +1708,7 @@ export class Agent {
           filesTransferred: result.filesRestored,
           bytesTransferred: result.bytesRestored,
           duration: result.durationMs,
-          error: result.error,
+          error: result.error ? sanitizeRcloneError(result.error) : undefined,
           type: 'restore',
         });
       } catch (reportError: unknown) {
@@ -1269,5 +1779,15 @@ export class Agent {
  */
 function configsEqual(a: AgentConfig | null, b: AgentConfig | null): boolean {
   if (a === null || b === null) return a === b;
-  return JSON.stringify(a) === JSON.stringify(b);
+  // Sort keys before comparison to avoid false positives from property order differences
+  const replacer = (_key: string, value: unknown): unknown =>
+    value !== null && typeof value === 'object' && !Array.isArray(value)
+      ? Object.keys(value as Record<string, unknown>)
+          .sort()
+          .reduce<Record<string, unknown>>((sorted, k) => {
+            sorted[k] = (value as Record<string, unknown>)[k];
+            return sorted;
+          }, {})
+      : value;
+  return JSON.stringify(a, replacer) === JSON.stringify(b, replacer);
 }

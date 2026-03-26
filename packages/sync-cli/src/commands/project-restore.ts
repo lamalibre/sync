@@ -1,8 +1,11 @@
+import { join } from 'node:path';
+import { homedir } from 'node:os';
 import * as p from '@clack/prompts';
 import pc from 'picocolors';
 import type { ApiClient } from '../lib/api-client.js';
 import { jsonOutput } from '../lib/format.js';
 import type { Project } from '../lib/types.js';
+import { readApprovedPaths, getLocalPath } from '@lamalibre/sync-shared';
 
 interface ProjectRestoreOptions {
   project?: string;
@@ -19,7 +22,11 @@ export async function projectRestoreCommand(
 
   // Interactive: show only soft-deleted projects
   if (!projectId) {
-    const projectsRes = await client.get<{ projects: Project[] }>('/api/sync/projects?includeDeleted=true');
+    const agentDir = join(homedir(), '.sync-agent');
+    const [projectsRes, approvedPaths] = await Promise.all([
+      client.get<{ projects: Project[] }>('/api/sync/projects?includeDeleted=true'),
+      readApprovedPaths(agentDir),
+    ]);
 
     const deleted = projectsRes.projects.filter((proj) => proj.deletedAt !== null);
 
@@ -33,7 +40,7 @@ export async function projectRestoreCommand(
       options: deleted.map((proj) => ({
         value: proj.id,
         label: proj.name,
-        hint: proj.localPath,
+        hint: getLocalPath(approvedPaths, proj.id) ?? proj.name,
       })),
     });
 

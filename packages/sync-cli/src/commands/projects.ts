@@ -1,3 +1,5 @@
+import { join } from 'node:path';
+import { homedir } from 'node:os';
 import * as p from '@clack/prompts';
 import pc from 'picocolors';
 import type { ApiClient } from '../lib/api-client.js';
@@ -9,6 +11,7 @@ import {
   jsonOutput,
 } from '../lib/format.js';
 import type { Project } from '../lib/types.js';
+import { readApprovedPaths, getLocalPath } from '@lamalibre/sync-shared';
 
 interface ProjectStatus {
   projectId: string;
@@ -32,7 +35,11 @@ interface ProjectsOptions {
 }
 
 export async function projectsCommand(client: ApiClient, opts: ProjectsOptions): Promise<void> {
-  const { projects } = await client.get<{ projects: Project[] }>('/api/sync/projects');
+  const agentDir = join(homedir(), '.sync-agent');
+  const [{ projects }, approvedPaths] = await Promise.all([
+    client.get<{ projects: Project[] }>('/api/sync/projects'),
+    readApprovedPaths(agentDir),
+  ]);
 
   if (projects.length === 0) {
     if (opts.json) {
@@ -87,10 +94,11 @@ export async function projectsCommand(client: ApiClient, opts: ProjectsOptions):
       return;
     }
 
+    const localPath = getLocalPath(approvedPaths, project.id);
     process.stdout.write(pc.bold(`\n  ${project.name}\n\n`));
     process.stdout.write(
       `  ID:              ${project.id}\n` +
-        `  Local path:      ${project.localPath}\n` +
+        `  Local path:      ${localPath ?? pc.dim('not configured')}\n` +
         `  Remote path:     ${project.remotePath}\n` +
         `  Direction:       ${project.direction}\n` +
         `  Status:          ${colorStatus(status.status)}\n` +

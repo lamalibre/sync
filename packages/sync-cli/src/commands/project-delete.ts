@@ -1,8 +1,11 @@
+import { join } from 'node:path';
+import { homedir } from 'node:os';
 import * as p from '@clack/prompts';
 import pc from 'picocolors';
 import type { ApiClient } from '../lib/api-client.js';
 import { jsonOutput } from '../lib/format.js';
 import type { Project } from '../lib/types.js';
+import { readApprovedPaths, getLocalPath } from '@lamalibre/sync-shared';
 
 interface ProjectDeleteOptions {
   project?: string;
@@ -20,8 +23,12 @@ export async function projectDeleteCommand(
 
   // Interactive project selection
   if (!projectId) {
+    const agentDir = join(homedir(), '.sync-agent');
     const includeDeleted = opts.permanent ? '?includeDeleted=true' : '';
-    const projectsRes = await client.get<{ projects: Project[] }>(`/api/sync/projects${includeDeleted}`);
+    const [projectsRes, approvedPaths] = await Promise.all([
+      client.get<{ projects: Project[] }>(`/api/sync/projects${includeDeleted}`),
+      readApprovedPaths(agentDir),
+    ]);
 
     const candidates = opts.permanent
       ? projectsRes.projects
@@ -39,7 +46,7 @@ export async function projectDeleteCommand(
       options: candidates.map((proj) => ({
         value: proj.id,
         label: proj.name,
-        hint: proj.deletedAt ? pc.dim('(deleted)') : proj.localPath,
+        hint: proj.deletedAt ? pc.dim('(deleted)') : (getLocalPath(approvedPaths, proj.id) ?? proj.name),
       })),
     });
 

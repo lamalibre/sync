@@ -58,7 +58,15 @@ async function ensureDataDir(): Promise<void> {
 async function readJson<T>(filePath: string, fallback: T): Promise<T> {
   try {
     const raw = await readFile(filePath, 'utf8');
-    return JSON.parse(raw) as T;
+    const parsed: unknown = JSON.parse(raw);
+    // Basic structural check: state files must be objects, not primitives/arrays
+    if (typeof parsed !== 'object' || parsed === null || Array.isArray(parsed)) {
+      process.stderr.write(
+        `Warning: ${filePath} contains unexpected JSON type (${typeof parsed}), using default.\n`,
+      );
+      return fallback;
+    }
+    return parsed as T;
   } catch (err: unknown) {
     if (err instanceof Error && 'code' in err && (err as NodeJS.ErrnoException).code === 'ENOENT') {
       return fallback;
@@ -132,19 +140,18 @@ export async function saveConfig(config: ServerConfig): Promise<void> {
 // ---------------------------------------------------------------------------
 
 export async function encryptStorageConfig(plain: StorageConfig): Promise<EncryptedStorageConfig> {
-  const result: EncryptedStorageConfig = {
+  return {
     provider: plain.provider,
     endpoint: plain.endpoint,
     bucket: plain.bucket,
-    region: plain.region,
+    ...(plain.region != null ? { region: plain.region } : {}),
     accessKeyEncrypted: await encrypt(plain.accessKey),
     secretKeyEncrypted: await encrypt(plain.secretKey),
     encryption: plain.encryption ?? false,
+    ...(plain.encryptionPassword
+      ? { encryptionPasswordEncrypted: await encrypt(plain.encryptionPassword) }
+      : {}),
   };
-  if (plain.encryptionPassword) {
-    result.encryptionPasswordEncrypted = await encrypt(plain.encryptionPassword);
-  }
-  return result;
 }
 
 export async function decryptStorageConfig(enc: EncryptedStorageConfig): Promise<StorageConfig> {
@@ -152,7 +159,7 @@ export async function decryptStorageConfig(enc: EncryptedStorageConfig): Promise
     provider: enc.provider,
     endpoint: enc.endpoint,
     bucket: enc.bucket,
-    region: enc.region,
+    region: enc.region ?? undefined,
     accessKey: await decrypt(enc.accessKeyEncrypted),
     secretKey: await decrypt(enc.secretKeyEncrypted),
     encryption: enc.encryption,
@@ -169,7 +176,7 @@ export function redactStorageConfig(enc: EncryptedStorageConfig): Record<string,
     provider: enc.provider,
     endpoint: enc.endpoint,
     bucket: enc.bucket,
-    region: enc.region,
+    region: enc.region ?? null,
     encryption: enc.encryption,
   };
 }
@@ -220,7 +227,6 @@ export async function createProject(input: ProjectCreate): Promise<Project> {
   const project: Project = {
     id,
     name: input.name,
-    localPath: input.localPath,
     remotePath: input.remotePath ?? `projects/${id}`,
     direction: input.direction,
     includes: input.includes,
@@ -235,6 +241,7 @@ export async function createProject(input: ProjectCreate): Promise<Project> {
     watch: input.watch,
     trigger: input.trigger,
     watchDebounceMs: input.watchDebounceMs,
+    ...(input.bandwidthLimit ? { bandwidthLimit: input.bandwidthLimit } : {}),
     ...(input.softDelete ? { softDelete: input.softDelete } : {}),
     status: 'local-only',
     lastSync: null,
@@ -250,7 +257,7 @@ export async function createProject(input: ProjectCreate): Promise<Project> {
 
 export async function loadActiveProjects(): Promise<Project[]> {
   const projects = await loadProjects();
-  return projects.filter((p) => p.deletedAt === null || p.deletedAt === undefined);
+  return projects.filter((p) => !p.deletedAt);
 }
 
 export async function getProject(projectId: string, includeDeleted = false): Promise<Project> {

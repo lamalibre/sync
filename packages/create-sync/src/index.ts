@@ -1,4 +1,7 @@
-import { checkNodeVersion, saveCliConfig as saveCliConfigShared } from '@lamalibre/sync-shared';
+import { checkNodeVersion, saveCliConfig as saveCliConfigShared, readApprovedPaths, writeApprovedPaths, addApproval, validateLocalPath } from '@lamalibre/sync-shared';
+import { join } from 'node:path';
+import { homedir } from 'node:os';
+import { mkdir } from 'node:fs/promises';
 
 checkNodeVersion();
 
@@ -254,7 +257,8 @@ async function createFirstProject(serverUrl: string, apiKey?: string): Promise<v
     placeholder: '/Users/you/projects/my-project',
     validate: (v) => {
       if (!v) return 'Path is required';
-      if (!v.startsWith('/')) return 'Must be an absolute path';
+      const err = validateLocalPath(v);
+      if (err) return err;
       return undefined;
     },
   });
@@ -276,22 +280,43 @@ async function createFirstProject(serverUrl: string, apiKey?: string): Promise<v
 
   const projectSpinner = p.spinner();
   projectSpinner.start('Creating project...');
+
+  let createdProject: { id: string; name: string };
   try {
-    await apiRequest(
+    const result = await apiRequest<{ ok: boolean; project: { id: string; name: string } }>(
       serverUrl,
       'POST',
       '/api/sync/projects',
       {
         name,
-        localPath,
         direction,
       },
       apiKey,
     );
-    projectSpinner.stop(pc.green(`Project "${name}" created.`));
+    createdProject = result.project;
+    projectSpinner.stop(pc.green(`Project "${createdProject.name}" created.`));
   } catch (err: unknown) {
     projectSpinner.stop(pc.red('Failed to create project'));
     p.log.error(err instanceof Error ? err.message : 'Unknown error');
+    return;
+  }
+
+  // Store local path mapping in agent's approved-paths.json (never sent to server)
+  try {
+    const agentDir = join(homedir(), '.sync-agent');
+    await mkdir(agentDir, { recursive: true, mode: 0o700 });
+    const approvedPaths = await readApprovedPaths(agentDir);
+    const updated = addApproval(approvedPaths, {
+      projectId: createdProject.id,
+      localPath: localPath as string,
+      approvedAt: new Date().toISOString(),
+      projectName: createdProject.name,
+    });
+    await writeApprovedPaths(agentDir, updated);
+    p.log.info(`Local path saved to agent config: ${localPath as string}`);
+  } catch (err: unknown) {
+    p.log.error(`Project "${createdProject.name}" was created on the server, but failed to save local path mapping: ${err instanceof Error ? err.message : 'Unknown error'}`);
+    p.log.info(`Run ${pc.cyan(`sync agent-approve ${createdProject.id} --path "${localPath as string}"`)} to set the local path manually.`);
   }
 }
 

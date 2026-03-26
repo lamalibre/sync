@@ -26,7 +26,6 @@ log_section "Create a project"
 
 PROJECT_CONFIG='{
   "name": "e2e-test-project",
-  "localPath": "/tmp/sync-e2e-project",
   "direction": "push",
   "excludes": ["*.tmp", ".DS_Store"]
 }'
@@ -44,7 +43,6 @@ log_section "Read the project"
 
 PROJECT=$(api_get "projects/${PROJECT_ID}")
 assert_json_field "$PROJECT" '.project.name' "e2e-test-project" "Project name matches"
-assert_json_field "$PROJECT" '.project.localPath' "/tmp/sync-e2e-project" "Local path matches"
 assert_json_field "$PROJECT" '.project.direction' "push" "Sync direction matches"
 
 # ---------------------------------------------------------------------------
@@ -68,24 +66,24 @@ PROJECT_AFTER=$(api_get "projects/${PROJECT_ID}")
 assert_json_field "$PROJECT_AFTER" '.project.direction' "bidirectional" "Sync direction updated"
 
 # ---------------------------------------------------------------------------
-log_section "Path security — reject traversal attacks"
+log_section "Path security — reject remotePath traversal attacks"
 # ---------------------------------------------------------------------------
 
 TRAVERSAL_CONFIG='{
   "name": "bad-project",
-  "localPath": "/tmp/../../../etc/passwd",
+  "remotePath": "projects/../../etc/passwd",
   "direction": "push"
 }'
 TRAVERSAL_STATUS=$(api_post_status "projects" "$TRAVERSAL_CONFIG")
-assert_not_eq "$TRAVERSAL_STATUS" "200" "Server rejects path traversal"
+assert_not_eq "$TRAVERSAL_STATUS" "200" "Server rejects remotePath traversal"
 
 # ---------------------------------------------------------------------------
-log_section "Path security — reject null bytes"
+log_section "Path security — reject null bytes in remotePath"
 # ---------------------------------------------------------------------------
 
-NULLBYTE_CONFIG='{"name":"bad","localPath":"/tmp/sync\u0000evil","direction":"push"}'
+NULLBYTE_CONFIG='{"name":"bad","remotePath":"test\u0000evil","direction":"push"}'
 NULLBYTE_STATUS=$(api_post_status "projects" "$NULLBYTE_CONFIG")
-assert_not_eq "$NULLBYTE_STATUS" "200" "Server rejects null bytes in path"
+assert_not_eq "$NULLBYTE_STATUS" "200" "Server rejects null bytes in remotePath"
 
 # ---------------------------------------------------------------------------
 log_section "Delete the project"
@@ -123,7 +121,6 @@ log_section "Exclude patterns — reject rclone filter prefixes"
 
 FILTER_PREFIX_CONFIG='{
   "name": "bad-excludes-test",
-  "localPath": "/tmp/sync-e2e-bad-excludes",
   "excludes": ["+ /etc/**"]
 }'
 FILTER_STATUS=$(api_post_status "projects" "$FILTER_PREFIX_CONFIG")

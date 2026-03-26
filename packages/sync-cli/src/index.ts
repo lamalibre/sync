@@ -16,6 +16,8 @@ import { trashPurgeCommand } from './commands/trash-purge.js';
 import { projectDeleteCommand } from './commands/project-delete.js';
 import { projectRestoreCommand } from './commands/project-restore.js';
 import { trashRestoreCommand } from './commands/trash-restore.js';
+import { agentApproveCommand } from './commands/agent-approve.js';
+import { previewCommand } from './commands/preview.js';
 
 export const PACKAGE_NAME = '@lamalibre/sync-cli';
 
@@ -82,6 +84,8 @@ ${pc.bold('Commands:')}
   trash-list [project]  List trash entries for a project
   trash-purge [project] Purge trash for a project
   trash-restore [project] [timestamp] Restore files from trash
+  agent-approve [id]    Approve or manage agent path allowlist
+  preview [project]     Review pending sync changes before execution
   uninstall             Remove agent, config, and service
   help                  Show this help message
 
@@ -92,6 +96,19 @@ ${pc.bold('Global Flags:')}
   --yes               Skip confirmation prompts
   --project <id>      Specify project ID (non-interactive)
   --detail <id>       Show details for a specific project (projects command)
+
+${pc.bold('Agent Approve Flags:')}
+  --list              Show approved and unmapped projects
+  --reject            Remove an existing approval
+  --path <dir>        Local directory path (non-interactive)
+  --access-mode <m>   Access mode: full, push-only, pull-only, protected
+  --confirm-mode <m>  Confirm mode: auto, confirm-destructive, confirm-always
+  --delete-threshold <n>  Max deletions before requiring confirmation (default: 10)
+  --agent-dir <path>  Override agent directory (default: ~/.sync-agent)
+
+${pc.bold('Preview Flags:')}
+  --approve           Approve a pending sync
+  --reject            Reject a pending sync
 
 ${pc.bold('Delete/Restore Flags:')}
   --permanent         Hard delete (project-delete only)
@@ -106,6 +123,11 @@ ${pc.bold('Examples:')}
   sync project-restore my-project
   sync trash-list my-project
   sync trash-purge my-project --older-than 7d --yes
+  sync agent-approve --list
+  sync agent-approve my-project --path /Users/me/projects/my-project
+  sync agent-approve my-project --access-mode push-only
+  sync preview
+  sync preview my-project --approve
   sync status --server http://remote:9393 --api-key sync_abc123
 
 ${pc.bold('Configuration:')}
@@ -130,6 +152,14 @@ export async function main(): Promise<void> {
   const detail = typeof flags['detail'] === 'string' ? flags['detail'] : undefined;
   const permanent = flags['permanent'] === true;
   const olderThan = typeof flags['older-than'] === 'string' ? flags['older-than'] : undefined;
+  const reject = flags['reject'] === true;
+  const list = flags['list'] === true;
+  const approve = flags['approve'] === true;
+  const agentDir = typeof flags['agent-dir'] === 'string' ? flags['agent-dir'] : undefined;
+  const accessMode = typeof flags['access-mode'] === 'string' ? flags['access-mode'] : undefined;
+  const confirmMode = typeof flags['confirm-mode'] === 'string' ? flags['confirm-mode'] : undefined;
+  const deleteThreshold = typeof flags['delete-threshold'] === 'string' ? flags['delete-threshold'] : undefined;
+  const pathFlag = typeof flags['path'] === 'string' ? flags['path'] : undefined;
 
   // Commands that don't need the API client
   if (command === 'help' || command === '--help' || command === '-h') {
@@ -200,6 +230,32 @@ export async function main(): Promise<void> {
 
       case 'trash-restore':
         await trashRestoreCommand(client, positional[0], positional[1], { project, json, yes });
+        break;
+
+      case 'agent-approve':
+        await agentApproveCommand(client, positional[0], {
+          project,
+          json,
+          yes,
+          reject,
+          list,
+          agentDir,
+          accessMode,
+          confirmMode,
+          deleteThreshold,
+          path: pathFlag,
+        });
+        break;
+
+      case 'preview':
+        await previewCommand(positional[0], {
+          project,
+          json,
+          yes,
+          approve,
+          reject,
+          agentDir,
+        });
         break;
 
       default:

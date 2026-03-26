@@ -88,6 +88,9 @@ export const E2E_DEPS = {
   10: [5], // encryption — encrypted sync via rclone crypt
   11: [5], // scheduled-sync — cron-based scheduling on agent
   12: [1], // plugin-mode — Portlama plugin manifest validation
+  13: [2, 3, 4], // soft-delete — trash management
+  14: [5], // error-paths — auth edge cases
+  15: [5], // path-security — allowlist, access mode, sync preview
 };
 
 /** Lazily discovered test map — cached after first call. */

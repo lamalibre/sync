@@ -2,7 +2,11 @@ import type { FastifyInstance } from 'fastify';
 import type { ZodTypeProvider } from 'fastify-type-provider-zod';
 import { z } from 'zod';
 import { execa } from 'execa';
-import { buildRcloneIni } from '@lamalibre/sync-shared';
+import { join } from 'node:path';
+import { unlink } from 'node:fs/promises';
+import { open } from 'node:fs/promises';
+import { randomUUID } from 'node:crypto';
+import { buildRcloneIni, sanitizeRcloneError } from '@lamalibre/sync-shared';
 import { storageUpdateSchema } from '../lib/schemas.js';
 import {
   loadConfig,
@@ -12,9 +16,6 @@ import {
   redactStorageConfig,
   getDataDir,
 } from '../lib/state.js';
-import { writeFile, unlink } from 'node:fs/promises';
-import { join } from 'node:path';
-import { randomUUID } from 'node:crypto';
 
 export async function storageRoutes(app: FastifyInstance): Promise<void> {
   const server = app.withTypeProvider<ZodTypeProvider>();
@@ -73,11 +74,14 @@ export async function storageRoutes(app: FastifyInstance): Promise<void> {
     const rcloneConf = buildTempRcloneConfig(decrypted);
     const confPath = join(getDataDir(), `rclone-test-${randomUUID()}.conf`);
 
-    await writeFile(confPath, rcloneConf, { mode: 0o600 });
+    await writeExclusiveFile(confPath, rcloneConf);
 
     const start = Date.now();
     try {
-      await execa('rclone', ['lsd', `sync-remote:${decrypted.bucket}`, '--config', confPath]);
+      await execa('rclone', ['lsd', `sync-remote:${decrypted.bucket}`, '--config', confPath], {
+        extendEnv: false,
+        env: buildMinimalRcloneEnv(confPath),
+      });
 
       const latency = Date.now() - start;
       config.lastTested = new Date().toISOString();
@@ -94,7 +98,7 @@ export async function storageRoutes(app: FastifyInstance): Promise<void> {
       config.testResult = 'error';
       await saveConfig(config);
 
-      const message = sanitizeRcloneError(err);
+      const message = sanitizeRcloneErrorResponse(err);
       return reply.status(502).send({
         ok: false,
         error: message,
@@ -111,7 +115,10 @@ export async function storageRoutes(app: FastifyInstance): Promise<void> {
       schema: {
         body: z
           .object({
-            bucket: z.string().min(1).max(255).optional(),
+            bucket: z.string().min(1).max(255)
+              .refine((v) => !/[\r\n]/.test(v), 'Bucket name must not contain newlines')
+              .refine((v) => !v.includes(':'), 'Bucket name must not contain colons')
+              .optional(),
           })
           .optional(),
       },
@@ -126,15 +133,18 @@ export async function storageRoutes(app: FastifyInstance): Promise<void> {
       }
 
       const decrypted = await decryptStorageConfig(config.storage);
-      const bucketName =
-        (request.body as { bucket?: string } | undefined)?.bucket ?? decrypted.bucket;
+      const parsed = request.body as { bucket?: string } | undefined;
+      const bucketName = parsed?.bucket ?? decrypted.bucket;
       const rcloneConf = buildTempRcloneConfig(decrypted);
       const confPath = join(getDataDir(), `rclone-test-${randomUUID()}.conf`);
 
-      await writeFile(confPath, rcloneConf, { mode: 0o600 });
+      await writeExclusiveFile(confPath, rcloneConf);
 
       try {
-        await execa('rclone', ['mkdir', `sync-remote:${bucketName}`, '--config', confPath]);
+        await execa('rclone', ['mkdir', `sync-remote:${bucketName}`, '--config', confPath], {
+          extendEnv: false,
+          env: buildMinimalRcloneEnv(confPath),
+        });
 
         return reply.send({
           ok: true,
@@ -142,7 +152,7 @@ export async function storageRoutes(app: FastifyInstance): Promise<void> {
           created: true,
         });
       } catch (err: unknown) {
-        const message = sanitizeRcloneError(err);
+        const message = sanitizeRcloneErrorResponse(err);
         return reply.status(502).send({
           ok: false,
           error: message,
@@ -159,14 +169,44 @@ export async function storageRoutes(app: FastifyInstance): Promise<void> {
 // ---------------------------------------------------------------------------
 
 /**
- * Sanitize rclone error messages to prevent credential leakage in API responses.
- * Extracts only the first line and redacts sensitive keywords.
+ * Build a minimal environment for server-side rclone commands.
+ * Prevents leaking parent env vars like RCLONE_CONFIG_PASS.
  */
-function sanitizeRcloneError(err: unknown): string {
+function buildMinimalRcloneEnv(confPath: string): Record<string, string> {
+  return {
+    PATH: process.env['PATH'] ?? '',
+    HOME: process.env['HOME'] ?? '',
+    ...(process.env['TMPDIR'] ? { TMPDIR: process.env['TMPDIR'] } : {}),
+    RCLONE_CONFIG: confPath,
+  };
+}
+
+/**
+ * Extract and sanitize rclone error messages for API responses.
+ * Uses the shared sanitizer for consistent credential redaction.
+ */
+function sanitizeRcloneErrorResponse(err: unknown): string {
   if (!(err instanceof Error)) {
     return 'Connection test failed';
   }
-  return (err.message.split('\n')[0] ?? '').replace(/key|secret|password|token/gi, '[REDACTED]');
+  // Take first line only (most relevant), then run through shared sanitizer
+  const firstLine = err.message.split('\n')[0] ?? '';
+  return sanitizeRcloneError(firstLine);
+}
+
+/**
+ * Write a temporary file exclusively with O_CREAT | O_EXCL to guarantee
+ * the file is freshly created with the correct permissions (0600).
+ * Unlike `writeFile` with a `mode` option, this never reuses a stale file.
+ */
+async function writeExclusiveFile(filePath: string, content: string): Promise<void> {
+  const fd = await open(filePath, 'wx', 0o600);
+  try {
+    await fd.writeFile(content);
+    await fd.sync();
+  } finally {
+    await fd.close();
+  }
 }
 
 function buildTempRcloneConfig(storage: {

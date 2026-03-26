@@ -105,8 +105,16 @@
   }
 
   async function handleDelete(): Promise<void> {
-    await deleteProject(projectId);
-    onNavigateBack();
+    actionInProgress = true;
+    actionError = null;
+    try {
+      await deleteProject(projectId);
+      onNavigateBack();
+    } catch (err: unknown) {
+      actionError = err instanceof Error ? err.message : "Delete failed";
+    } finally {
+      actionInProgress = false;
+    }
   }
 
   function handleProjectUpdated(updated: Project): void {
@@ -191,7 +199,7 @@
   <div class="mb-6 flex items-start justify-between">
     <div>
       <h1 class="text-lg font-semibold text-text-primary">{project.name}</h1>
-      <p class="mt-1 text-xs text-text-secondary">{project.localPath}</p>
+      <p class="mt-1 text-xs text-text-secondary">{project.remotePath}</p>
     </div>
     <div class="flex items-center gap-2">
       <button

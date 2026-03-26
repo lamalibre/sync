@@ -3,7 +3,7 @@
  * Handles reading/writing agent settings and caching server-provided config.
  */
 
-import { readFile, writeFile, mkdir } from 'node:fs/promises';
+import { readFile, writeFile, mkdir, open } from 'node:fs/promises';
 import { join } from 'node:path';
 import { homedir } from 'node:os';
 import { createCipheriv, createDecipheriv, randomBytes, scrypt } from 'node:crypto';
@@ -48,10 +48,29 @@ async function getAgentMasterKey(agentDir: string): Promise<string> {
     return cachedAgentMasterKey;
   } catch (err: unknown) {
     if (isNodeError(err) && err.code === 'ENOENT') {
-      // First run — generate a new random key
+      // First run — generate a new random key.
+      // Use O_CREAT|O_EXCL to prevent a race where two processes both see
+      // ENOENT and generate different keys (the second write would silently
+      // overwrite the first, making data encrypted by the first process
+      // permanently unrecoverable).
       await mkdir(agentDir, { recursive: true, mode: 0o700 });
       const key = randomBytes(32).toString('hex');
-      await writeFile(keyPath, key, { mode: 0o600 });
+      try {
+        const fd = await open(keyPath, 'wx', 0o600);
+        try {
+          await fd.writeFile(key);
+          await fd.sync();
+        } finally {
+          await fd.close();
+        }
+      } catch (createErr: unknown) {
+        if (isNodeError(createErr) && createErr.code === 'EEXIST') {
+          // Another process created the key first — read it instead
+          cachedAgentMasterKey = (await readFile(keyPath, 'utf-8')).trim();
+          return cachedAgentMasterKey;
+        }
+        throw createErr;
+      }
       cachedAgentMasterKey = key;
       return key;
     }

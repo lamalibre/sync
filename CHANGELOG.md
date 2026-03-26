@@ -20,6 +20,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Add server-initiated operation detection — agent picks up pending operations via `pendingOperationId` on config poll
 - Add `local` provider type for local-to-local rclone sync
 - Add `projectIdSchema` validation (lowercase alphanumeric + hyphens only) across all route params
+- Add agent-side path approval — `sync agent-approve` command maps project IDs to local directories; local paths never leave the agent machine
+- Add access modes (`full`, `push-only`, `pull-only`, `protected`) per approved path to control sync direction at the agent level
+- Add sync preview/confirm workflow — agent runs `rclone --dry-run` and saves pending previews for user approval before executing destructive syncs
+- Add confirm modes (`auto`, `confirm-destructive`, `confirm-always`) configurable per approved path with configurable delete thresholds
+- Add `sync preview` CLI command to list, inspect, approve, or reject pending sync previews
+- Add protected pull mode using `rclone copy --ignore-existing` — downloads new files without overwriting or deleting existing local files
+- Add per-project encryption passwords stored encrypted at rest, independent of the global storage encryption password
+- Add rclone crypt remote overlay generation for encrypted projects with `rclone obscure` password handling via stdin
+- Add `sanitizeRcloneError` utility to redact credential patterns from rclone error messages before logging
+- Add deployment use cases guide with real-world deployment scenarios
 
 ### Changed
 
@@ -35,6 +45,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Agent config endpoint now returns only active (non-deleted) projects
 - Agent reports for in-flight operations on deleted projects are still accepted (graceful completion)
 - Validate glob metacharacters in restore file paths now includes `]`, `\`, `}`
+- Remove `localPath` from server-side project model — local paths are now agent-only via `approved-paths.json`
+- Sanitize rclone child process environment with `extendEnv: false` to prevent leaking parent env vars
 
 ### Fixed
 
@@ -42,12 +54,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Fix stub file path construction to use `path.join()` instead of string concatenation
 - Fix archive restore to verify `projectId` matches stub metadata (prevents cross-project restore)
 - Fix agent-initiated syncs (watch/schedule) creating history entries when no server-side entry exists
+- Fix dry-run failure silently bypassing confirm mode — now correctly blocks sync when preview cannot be generated
+- Fix `buildSyncEndpoints` silently treating bidirectional as push — now throws to enforce `runRcloneBisync` usage
+- Fix `writeExclusiveFile` missing fsync before close for temporary rclone config files
 
 ### Security
 
 - Use `timingSafeEqual` for setup token comparison to prevent timing attacks
 - Add defense-in-depth pattern validation in agent's `buildExcludeFlags()` (rejects unsafe patterns even from cached config)
 - Validate remote trash directory names before `rclone purge` to prevent path traversal
+- Use exclusive file creation (`O_CREAT|O_EXCL`) for master key generation to prevent race-condition key overwrite causing data loss
+- Validate pending sync preview action values to reject tampered files with unknown actions
 
 ## [0.1.0] - 2026-03-24
 

@@ -19,7 +19,6 @@ log_section "Create test project for soft delete"
 
 SD_PROJECT_CONFIG='{
   "name": "soft-delete-test",
-  "localPath": "/tmp/sync-e2e-sd",
   "excludes": ["*.tmp", ".DS_Store"]
 }'
 
@@ -28,6 +27,28 @@ assert_json_field "$RESPONSE" '.ok' "true" "Soft-delete test project created"
 
 SD_PROJECT_ID=$(echo "$RESPONSE" | jq -r '.project.id')
 log_info "Project ID: $SD_PROJECT_ID"
+
+# Write the local path mapping to approved-paths.json on the agent VM
+agent_exec "cat > /root/.sync-agent/approved-paths.json << 'APEOF'
+{
+  \"version\": 1,
+  \"entries\": [
+    {
+      \"projectId\": \"e2e-test-project\",
+      \"localPath\": \"/tmp/sync-e2e-project\",
+      \"approvedAt\": \"2026-01-01T00:00:00.000Z\",
+      \"projectName\": \"e2e-test-project\"
+    },
+    {
+      \"projectId\": \"soft-delete-test\",
+      \"localPath\": \"/tmp/sync-e2e-sd\",
+      \"approvedAt\": \"2026-01-01T00:00:00.000Z\",
+      \"projectName\": \"soft-delete-test\"
+    }
+  ]
+}
+APEOF
+chmod 0600 /root/.sync-agent/approved-paths.json"
 
 # Verify deletedAt is null on creation
 assert_json_field "$RESPONSE" '.project.deletedAt' "null" "Project deletedAt is null on creation"
@@ -178,7 +199,6 @@ log_section "Cron expression validation"
 # Invalid cron expression in schedule should be rejected
 INVALID_CRON_PROJECT='{
   "name": "bad-cron-test",
-  "localPath": "/tmp/sync-e2e-bad-cron",
   "schedule": "not-a-cron",
   "trigger": "schedule"
 }'
@@ -188,7 +208,6 @@ assert_eq "$CRON_STATUS" "400" "Invalid cron expression in schedule rejected"
 # 6-field (seconds) cron expression should be rejected
 SECONDS_CRON_PROJECT='{
   "name": "seconds-cron-test",
-  "localPath": "/tmp/sync-e2e-sec-cron",
   "schedule": "*/5 * * * * *",
   "trigger": "schedule"
 }'
@@ -198,7 +217,6 @@ assert_eq "$SECONDS_STATUS" "400" "6-field (seconds) cron expression rejected"
 # Valid cron expression should be accepted
 VALID_CRON_PROJECT='{
   "name": "valid-cron-test",
-  "localPath": "/tmp/sync-e2e-valid-cron",
   "schedule": "0 */6 * * *",
   "trigger": "schedule"
 }'
@@ -215,7 +233,6 @@ log_section "Encryption password minimum length"
 
 SHORT_PW_PROJECT='{
   "name": "short-pw-test",
-  "localPath": "/tmp/sync-e2e-short-pw",
   "encrypted": true,
   "encryptionPassword": "short"
 }'
@@ -230,7 +247,6 @@ log_section "Delete during active operation returns 409"
 # then immediately try to delete — should get 409
 ACTIVE_OP_PROJECT='{
   "name": "active-op-delete-test",
-  "localPath": "/tmp/sync-e2e-active-op",
   "direction": "push"
 }'
 ACTIVE_OP_RESPONSE=$(api_post "projects" "$ACTIVE_OP_PROJECT")

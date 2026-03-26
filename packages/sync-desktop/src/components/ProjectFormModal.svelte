@@ -9,8 +9,8 @@
     SyncTrigger,
     ConflictStrategy,
   } from "../lib/types.js";
-  import { AlertCircle, Loader2, FolderOpen, ChevronDown, ChevronUp } from "lucide-svelte";
-  import { open } from "@tauri-apps/plugin-dialog";
+  import { AlertCircle, Loader2, ChevronDown, ChevronUp } from "lucide-svelte";
+  import { untrack } from "svelte";
 
   interface Props {
     project?: Project;
@@ -20,36 +20,31 @@
 
   let { project, onsave, oncancel }: Props = $props();
 
-  const isEdit = !!project;
+  // Capture initial values outside the reactive graph — this modal is
+  // mounted fresh each time, so we only need the initial prop value.
+  const initial = untrack(() => project);
+  const isEdit = !!initial;
 
   // Basic fields
-  let name = $state(project?.name ?? "");
-  let localPath = $state(project?.localPath ?? "");
-  let remotePath = $state(project?.remotePath ?? "");
-  let direction: SyncDirection = $state(project?.direction ?? "push");
-  let trigger: SyncTrigger = $state(project?.trigger ?? "manual");
-  let conflictStrategy: ConflictStrategy = $state(project?.conflictStrategy ?? "newest-wins");
+  let name = $state(initial?.name ?? "");
+  let remotePath = $state(initial?.remotePath ?? "");
+  let direction: SyncDirection = $state(initial?.direction ?? "push");
+  let trigger: SyncTrigger = $state(initial?.trigger ?? "manual");
+  let conflictStrategy: ConflictStrategy = $state(initial?.conflictStrategy ?? "newest-wins");
 
   // Advanced fields
   let showAdvanced = $state(false);
-  let encrypted = $state(project?.encrypted ?? false);
+  let encrypted = $state(initial?.encrypted ?? false);
   let encryptionPassword = $state("");
-  let excludes = $state(project?.excludes.join(", ") ?? ".git, .DS_Store, *.tmp");
-  let bandwidthLimit = $state(project?.bandwidthLimit ?? "");
-  let watchDebounceMs = $state(String(project?.watchDebounceMs ?? 5000));
+  let excludes = $state(initial?.excludes.join(", ") ?? ".git, .DS_Store, *.tmp");
+  let bandwidthLimit = $state(initial?.bandwidthLimit ?? "");
+  let watchDebounceMs = $state(String(initial?.watchDebounceMs ?? 5000));
 
   let loading = $state(false);
   let error: string | null = $state(null);
 
-  async function pickFolder(): Promise<void> {
-    const selected = await open({ directory: true, multiple: false });
-    if (selected) {
-      localPath = selected;
-    }
-  }
-
   async function handleSubmit(): Promise<void> {
-    if (!name.trim() || !localPath.trim()) return;
+    if (!name.trim()) return;
 
     loading = true;
     error = null;
@@ -62,7 +57,6 @@
       if (isEdit && project) {
         const input: ProjectUpdateInput = {
           name: name.trim(),
-          localPath: localPath.trim(),
           remotePath: remotePath.trim() || undefined,
           direction,
           trigger,
@@ -80,7 +74,6 @@
       } else {
         const input: ProjectCreateInput = {
           name: name.trim(),
-          localPath: localPath.trim(),
           remotePath: remotePath.trim() || undefined,
           direction,
           trigger,
@@ -129,29 +122,6 @@
         class="w-full rounded-md border border-border bg-surface px-3 py-2 text-sm text-text-primary placeholder:text-text-secondary/50 focus:border-accent focus:outline-none"
         placeholder="my-project"
       />
-    </div>
-
-    <!-- Local Path -->
-    <div>
-      <label for="pf-path" class="mb-1 block text-xs text-text-secondary">Local Path</label>
-      <div class="flex gap-2">
-        <input
-          id="pf-path"
-          type="text"
-          bind:value={localPath}
-          required
-          class="min-w-0 flex-1 rounded-md border border-border bg-surface px-3 py-2 text-sm text-text-primary placeholder:text-text-secondary/50 focus:border-accent focus:outline-none"
-          placeholder="/Users/you/projects/my-project"
-        />
-        <button
-          type="button"
-          class="flex items-center gap-1.5 rounded-md border border-border bg-card-hover px-3 py-2 text-sm text-text-secondary transition-colors hover:text-accent"
-          onclick={pickFolder}
-        >
-          <FolderOpen class="h-4 w-4" />
-          Browse
-        </button>
-      </div>
     </div>
 
     <!-- Remote Path -->
@@ -240,8 +210,8 @@
               type="password"
               bind:value={encryptionPassword}
               class="w-full rounded-md border border-border bg-card px-3 py-2 text-sm text-text-primary focus:border-accent focus:outline-none"
-              placeholder="Min 8 characters"
-              minlength="8"
+              placeholder="Min 12 characters"
+              minlength="12"
             />
           </div>
         {/if}
@@ -298,7 +268,7 @@
       <button
         type="submit"
         class="flex items-center gap-2 rounded-md bg-accent px-4 py-2 text-sm font-medium text-surface transition-colors hover:bg-accent-dim disabled:opacity-50"
-        disabled={loading || !name.trim() || !localPath.trim()}
+        disabled={loading || !name.trim()}
       >
         {#if loading}
           <Loader2 class="h-4 w-4 animate-spin" />

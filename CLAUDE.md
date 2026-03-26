@@ -11,6 +11,7 @@ sync/
 │   ├── sync-agent/         @lamalibre/sync-agent — Agent daemon
 │   ├── sync-cli/           @lamalibre/sync-cli — CLI tool
 │   ├── sync-shared/        @lamalibre/sync-shared — Shared utilities
+│   ├── sync-desktop/       @lamalibre/sync-desktop — Svelte desktop UI
 │   └── create-sync/        @lamalibre/create-sync — npx installer
 ├── tests/
 │   └── e2e/               E2E tests
@@ -78,6 +79,9 @@ Build before considering a task complete. Avoid commands that hang (e.g., `npm s
 - Config bundles encrypted with one-time passphrase
 - Path validation: no null bytes, no `..` after normalization, max 4096 characters
 - rclone passwords passed via `RCLONE_CONFIG_PASS` environment variable, never as CLI arguments
+- Local paths never cross the network — stored in `approved-paths.json` on the agent only, set via `sync agent-approve`
+- Access modes: agent-local direction overrides allow per-agent sync direction control
+- Sync preview/confirm modes: operations can be previewed before execution
 
 ## Environment Variables
 

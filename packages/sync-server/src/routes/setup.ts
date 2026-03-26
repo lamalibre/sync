@@ -30,18 +30,22 @@ export async function setupRoutes(app: FastifyInstance): Promise<void> {
     // race-condition hijacking of the first-time setup endpoint.
     if (!config.apiKeyHash) {
       const setupToken = request.server.setupToken;
-      if (setupToken) {
-        const providedToken = request.headers['x-setup-token'] as string | undefined;
-        if (
-          !providedToken ||
-          providedToken.length !== setupToken.length ||
-          !timingSafeEqual(Buffer.from(providedToken), Buffer.from(setupToken))
-        ) {
-          return reply.status(401).send({
-            ok: false,
-            error: 'Setup token required. Check server logs.',
-          });
-        }
+      if (!setupToken) {
+        return reply.status(503).send({
+          ok: false,
+          error: 'Server not configured for initial setup. Restart with setup token support.',
+        });
+      }
+      const providedToken = request.headers['x-setup-token'] as string | undefined;
+      if (
+        !providedToken ||
+        providedToken.length !== setupToken.length ||
+        !timingSafeEqual(Buffer.from(providedToken), Buffer.from(setupToken))
+      ) {
+        return reply.status(401).send({
+          ok: false,
+          error: 'Setup token required. Check server logs.',
+        });
       }
     }
 

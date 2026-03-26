@@ -1,3 +1,5 @@
+import { join } from 'node:path';
+import { homedir } from 'node:os';
 import pc from 'picocolors';
 import type { ApiClient } from '../lib/api-client.js';
 import {
@@ -8,6 +10,7 @@ import {
   jsonOutput,
 } from '../lib/format.js';
 import type { Project } from '../lib/types.js';
+import { readApprovedPaths, getLocalPath } from '@lamalibre/sync-shared';
 
 interface GlobalStatus {
   storageConfigured: boolean;
@@ -23,9 +26,11 @@ interface StatusOptions {
 }
 
 export async function statusCommand(client: ApiClient, opts: StatusOptions): Promise<void> {
-  const [globalStatus, projectsRes] = await Promise.all([
+  const agentDir = join(homedir(), '.sync-agent');
+  const [globalStatus, projectsRes, approvedPaths] = await Promise.all([
     client.get<GlobalStatus>('/api/sync/status'),
     client.get<{ projects: Project[] }>('/api/sync/projects'),
+    readApprovedPaths(agentDir),
   ]);
 
   if (opts.json) {
@@ -62,13 +67,16 @@ export async function statusCommand(client: ApiClient, opts: StatusOptions): Pro
     return;
   }
 
-  const rows = projectsRes.projects.map((p) => ({
-    name: p.name,
-    direction: p.direction,
-    status: colorStatus(p.status),
-    lastSync: p.lastSync ? formatRelativeTime(p.lastSync) : pc.dim('never'),
-    path: pc.dim(p.localPath),
-  }));
+  const rows = projectsRes.projects.map((proj) => {
+    const localPath = getLocalPath(approvedPaths, proj.id);
+    return {
+      name: proj.name,
+      direction: proj.direction,
+      status: colorStatus(proj.status),
+      lastSync: proj.lastSync ? formatRelativeTime(proj.lastSync) : pc.dim('never'),
+      path: pc.dim(localPath ?? 'not configured'),
+    };
+  });
 
   const table = renderTable(
     [

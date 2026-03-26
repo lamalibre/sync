@@ -201,7 +201,7 @@
           </div>
 
           <p class="mb-3 truncate text-xs text-text-secondary">
-            {project.localPath}
+            {project.remotePath}
           </p>
 
           <div class="mt-auto flex items-center gap-4 text-xs text-text-secondary">

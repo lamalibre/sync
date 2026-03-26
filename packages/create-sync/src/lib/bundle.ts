@@ -32,7 +32,6 @@ export interface BundleContents {
   };
   projects: Array<{
     name: string;
-    localPath: string;
     remotePath: string;
     direction: string;
     excludes: string[];

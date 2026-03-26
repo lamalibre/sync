@@ -19,7 +19,6 @@ Set `encrypted: true` and provide a password when creating a project:
 ```json
 {
   "name": "sensitive-data",
-  "localPath": "/home/user/sensitive",
   "direction": "push",
   "encrypted": true,
   "encryptionPassword": "my-very-strong-passphrase"
@@ -41,7 +40,7 @@ The server returns a warning: **"Encryption enabled. If you lose the password, t
 
 ### Password Management
 
-- **Per-project passwords** — each project can have its own encryption password (minimum 8 characters)
+- **Per-project passwords** — each project can have its own encryption password (minimum 12 characters)
 - **Global password** — the storage config can define a fallback encryption password for projects that do not specify one
 - **Password loss = data loss** — there is no key recovery mechanism. Store passwords securely.
 
@@ -96,10 +95,10 @@ All sync operations then use `sync-encrypted:` instead of `sync-remote:<bucket>/
 rclone requires passwords to be "obscured" (a reversible encoding, not encryption). The agent calls:
 
 ```
-rclone obscure <password>
+rclone obscure -
 ```
 
-The password is passed via stdin, never as a CLI argument. The obscured value is written to `rclone.conf`.
+The `-` argument tells rclone to read from stdin. The password is passed via stdin, never as a CLI argument. The obscured value is written to `rclone.conf`.
 
 ### Multi-Project Encryption
 
@@ -108,16 +107,18 @@ When multiple projects share the same encryption password, they share one crypt 
 ```ini
 [sync-encrypted]
 type = crypt
-remote = sync-remote:bucket/project-a
+remote = sync-remote:bucket
 password = <obscured-password-1>
 ...
 
 [sync-encrypted-2]
 type = crypt
-remote = sync-remote:bucket/project-b
+remote = sync-remote:bucket
 password = <obscured-password-2>
 ...
 ```
+
+Each crypt remote points to the bucket root. The project-specific path is specified at invocation time (e.g., `sync-encrypted:project-a/path`).
 
 The agent builds a `cryptRemoteMap` mapping unique passwords to remote names.
 
@@ -153,7 +154,7 @@ rclone crypt configuration used by Sync:
 | --- | --- |
 | **Content cipher** | NaCl SecretBox (XSalsa20 + Poly1305) |
 | **Filename cipher** | EME wide-block encryption |
-| **Minimum password** | 8 characters |
+| **Minimum password** | 12 characters |
 | **Password storage** | AES-256-GCM encrypted at rest on server |
 | **Password in transit** | mTLS tunnel (plugin) or HTTPS (standalone) |
 | **Password in rclone.conf** | Obscured (rclone's reversible encoding) |

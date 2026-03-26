@@ -10,7 +10,7 @@
  * then re-saved in encrypted form on the next write.
  */
 
-import { readFile, writeFile, mkdir } from 'node:fs/promises';
+import { readFile, writeFile, mkdir, open } from 'node:fs/promises';
 import { join } from 'node:path';
 import { homedir } from 'node:os';
 import { createCipheriv, createDecipheriv, randomBytes, scrypt } from 'node:crypto';
@@ -68,9 +68,27 @@ async function getCliMasterKey(): Promise<string> {
     return cachedCliMasterKey;
   } catch (err: unknown) {
     if (isNodeError(err) && err.code === 'ENOENT') {
+      // Use O_CREAT|O_EXCL to prevent a race where two processes both see
+      // ENOENT and generate different keys (second write would silently
+      // overwrite the first, making data encrypted by the first process
+      // permanently unrecoverable).
       await mkdir(CONFIG_DIR, { recursive: true, mode: 0o700 });
       const key = randomBytes(32).toString('hex');
-      await writeFile(MASTER_KEY_PATH, key, { mode: 0o600 });
+      try {
+        const fd = await open(MASTER_KEY_PATH, 'wx', 0o600);
+        try {
+          await fd.writeFile(key);
+          await fd.sync();
+        } finally {
+          await fd.close();
+        }
+      } catch (createErr: unknown) {
+        if (isNodeError(createErr) && createErr.code === 'EEXIST') {
+          cachedCliMasterKey = (await readFile(MASTER_KEY_PATH, 'utf-8')).trim();
+          return cachedCliMasterKey;
+        }
+        throw createErr;
+      }
       cachedCliMasterKey = key;
       return key;
     }

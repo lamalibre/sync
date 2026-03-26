@@ -136,7 +136,6 @@ log_section "Cron step-of-zero rejected"
 
 CRON_ZERO_CONFIG='{
   "name": "bad-cron-zero",
-  "localPath": "/tmp/sync-e2e-bad-cron-zero",
   "schedule": "*/0 * * * *"
 }'
 CRON_ZERO_STATUS=$(api_post_status "projects" "$CRON_ZERO_CONFIG")

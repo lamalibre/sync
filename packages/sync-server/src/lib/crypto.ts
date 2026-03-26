@@ -1,8 +1,8 @@
 import { createCipheriv, createDecipheriv, randomBytes, scrypt } from 'node:crypto';
-import { readFile, writeFile, mkdir } from 'node:fs/promises';
+import { readFile, mkdir } from 'node:fs/promises';
 import { join, dirname } from 'node:path';
 import { promisify } from 'node:util';
-import { isNodeError } from '@lamalibre/sync-shared';
+import { isNodeError, atomicWriteFile } from '@lamalibre/sync-shared';
 
 const scryptAsync = promisify(scrypt);
 
@@ -42,7 +42,7 @@ async function getMasterKey(dataDir: string): Promise<string> {
       const keyDir = dirname(keyPath);
       await mkdir(keyDir, { recursive: true, mode: 0o700 });
       const key = randomBytes(32).toString('hex');
-      await writeFile(keyPath, key, { mode: 0o600 });
+      await atomicWriteFile(keyPath, key, 0o600);
       cachedMasterKey = key;
       return key;
     }

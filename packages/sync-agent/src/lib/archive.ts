@@ -9,7 +9,7 @@
 
 import { execa } from 'execa';
 import { stat, unlink, mkdir } from 'node:fs/promises';
-import { join } from 'node:path';
+import { join, resolve } from 'node:path';
 import type { Logger } from 'pino';
 import {
   DEFAULT_TRANSFERS,
@@ -19,10 +19,10 @@ import {
   DEFAULT_LOW_LEVEL_RETRIES,
 } from '@lamalibre/sync-shared';
 import { createProgressParser } from './progress-parser.js';
-import { buildExcludeFlags, buildBandwidthFlags } from './rclone-runner.js';
+import { buildIncludeFlags, buildExcludeFlags, buildBandwidthFlags, buildRcloneEnv, sanitizeRcloneError } from './rclone-runner.js';
 import { buildRemoteTrashPath } from './trash-paths.js';
 import { scanDirectory, buildStubData, writeStub, readStub, STUB_FILENAME } from './stub.js';
-import type { SyncProgress, SoftDeleteConfig } from './types.js';
+import type { SyncProgress, SoftDeleteConfig, ProviderType } from './types.js';
 import type { StubData } from './stub.js';
 
 // ---------------------------------------------------------------------------
@@ -37,7 +37,8 @@ export interface ArchiveOptions {
   readonly rcloneConfigPath: string;
   readonly remoteName: string;
   readonly bucket: string;
-  readonly provider: string;
+  readonly provider: ProviderType;
+  readonly includes: readonly string[];
   readonly excludes: readonly string[];
   readonly bandwidthLimit?: string;
   readonly softDelete?: SoftDeleteConfig;
@@ -103,8 +104,6 @@ export async function runArchive(
       'move',
       options.localPath,
       remote,
-      '--config',
-      options.rcloneConfigPath,
       '--progress',
       '--stats-one-line',
       '--stats',
@@ -118,6 +117,7 @@ export async function runArchive(
       '--low-level-retries',
       DEFAULT_LOW_LEVEL_RETRIES,
       '--delete-empty-src-dirs',
+      ...buildIncludeFlags(options.includes),
       ...buildExcludeFlags(options.excludes),
       // Exclude the stub file from being moved
       '--exclude',
@@ -134,9 +134,8 @@ export async function runArchive(
     const childProcess = execa('rclone', args, {
       cancelSignal: abortSignal,
       gracefulCancel: true,
-      env: {
-        RCLONE_CONFIG: options.rcloneConfigPath,
-      },
+      env: buildRcloneEnv(options.rcloneConfigPath),
+      extendEnv: false,
       stdout: 'pipe',
       stderr: 'pipe',
     });
@@ -162,7 +161,7 @@ export async function runArchive(
     const stubData = buildStubData({
       scan,
       remotePath: options.remotePath,
-      provider: options.provider as StubData['provider'],
+      provider: options.provider,
       bucket: options.bucket,
       projectId: options.projectId,
     });
@@ -200,7 +199,7 @@ export async function runArchive(
       };
     }
 
-    archiveLogger.error({ err: errorMessage, durationMs }, 'Archive failed');
+    archiveLogger.error({ err: sanitizeRcloneError(errorMessage), durationMs }, 'Archive failed');
     return {
       operationId: options.operationId,
       projectId: options.projectId,
@@ -209,7 +208,7 @@ export async function runArchive(
       fileCount: 0,
       spaceFreed: 0,
       durationMs,
-      error: errorMessage,
+      error: sanitizeRcloneError(errorMessage),
     };
   }
 }
@@ -316,8 +315,6 @@ export async function runRestore(
       'copy',
       remote,
       options.localPath,
-      '--config',
-      options.rcloneConfigPath,
       '--progress',
       '--stats-one-line',
       '--stats',
@@ -335,6 +332,15 @@ export async function runRestore(
 
     // Single-file restore: use --include to limit to one file
     if (options.singleFilePath) {
+      // Defense-in-depth: validate singleFilePath at the agent before passing to rclone.
+      // The server validates this too, but the agent may receive values from cache or future code paths.
+      if (
+        options.singleFilePath.includes('\0') ||
+        options.singleFilePath.includes('..') ||
+        options.singleFilePath.startsWith('/')
+      ) {
+        throw new Error('Invalid singleFilePath: contains null bytes, ".." segments, or is absolute');
+      }
       args.push('--include', options.singleFilePath);
     }
 
@@ -345,9 +351,8 @@ export async function runRestore(
     const childProcess = execa('rclone', args, {
       cancelSignal: abortSignal,
       gracefulCancel: true,
-      env: {
-        RCLONE_CONFIG: options.rcloneConfigPath,
-      },
+      env: buildRcloneEnv(options.rcloneConfigPath),
+      extendEnv: false,
       stdout: 'pipe',
       stderr: 'pipe',
     });
@@ -376,7 +381,16 @@ export async function runRestore(
         const results = await Promise.all(
           batch.map(async (entry) => {
             try {
-              const fileStat = await stat(join(options.localPath, entry.path));
+              // Validate entry.path to prevent traversal via tampered stub.
+              // Append separator to base to prevent prefix-match escape
+              // (e.g. /foo/bar matching /foo/barsecret).
+              const resolvedBase = resolve(options.localPath) + '/';
+              const fullPath = resolve(join(options.localPath, entry.path));
+              if (!fullPath.startsWith(resolvedBase)) {
+                restoreLogger.warn({ path: entry.path }, 'Skipping stub entry with path traversal');
+                return false;
+              }
+              const fileStat = await stat(fullPath);
               if (fileStat.size === entry.size) {
                 return true;
               }
@@ -442,7 +456,7 @@ export async function runRestore(
       };
     }
 
-    restoreLogger.error({ err: errorMessage, durationMs }, 'Restore failed');
+    restoreLogger.error({ err: sanitizeRcloneError(errorMessage), durationMs }, 'Restore failed');
     return {
       operationId: options.operationId,
       projectId: options.projectId,
@@ -450,7 +464,7 @@ export async function runRestore(
       filesRestored: 0,
       bytesRestored: 0,
       durationMs,
-      error: errorMessage,
+      error: sanitizeRcloneError(errorMessage),
     };
   }
 }

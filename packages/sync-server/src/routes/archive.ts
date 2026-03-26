@@ -1,3 +1,4 @@
+import { posix } from 'node:path';
 import type { FastifyInstance } from 'fastify';
 import type { ZodTypeProvider } from 'fastify-type-provider-zod';
 import { z } from 'zod';
@@ -145,10 +146,17 @@ export async function archiveRoutes(app: FastifyInstance): Promise<void> {
             filePath: z
               .string()
               .min(1)
-              .refine((p) => !p.includes('\0') && !p.split('/').includes('..'), {
-                message: 'Invalid file path',
+              .max(4096, 'File path must be at most 4096 characters')
+              .refine((p) => {
+                if (p.includes('\0')) return false;
+                if (p.startsWith('/')) return false;
+                const normalized = posix.normalize(p);
+                const segments = normalized.split('/').filter(Boolean);
+                return !segments.includes('..');
+              }, {
+                message: 'File path must be relative, with no null bytes or ".." segments',
               })
-              .refine((p) => !/[*?[{\]\\}]/.test(p), {
+              .refine((p) => !/[*?\[{}\]\\]/.test(posix.normalize(p)), {
                 message: 'File path must not contain glob metacharacters (*, ?, [, ], {, }, \\)',
               })
               .optional(),

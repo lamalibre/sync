@@ -13,7 +13,6 @@ Create a new sync project.
 ```json
 {
   "name": "training-data",
-  "localPath": "/home/user/data/training",
   "remotePath": "projects/training",
   "direction": "bidirectional",
   "watch": true,
@@ -29,7 +28,9 @@ Create a new sync project.
 }
 ```
 
-**Required fields:** `name`, `localPath`
+**Required fields:** `name`
+
+> **Note:** `localPath` is not set on the server. The local path is configured on each agent via `sync agent-approve`, which stores it in the agent's `approved-paths.json`. This ensures local filesystem paths never cross the network.
 
 **Response (201):**
 
@@ -39,7 +40,6 @@ Create a new sync project.
   "project": {
     "id": "training-data",
     "name": "training-data",
-    "localPath": "/home/user/data/training",
     "remotePath": "projects/training",
     "direction": "bidirectional",
     "status": "local-only",
@@ -68,7 +68,6 @@ Create a new sync project.
     {
       "id": "training-data",
       "name": "training-data",
-      "localPath": "/home/user/data/training",
       "remotePath": "projects/training",
       "direction": "bidirectional",
       "status": "synced",
@@ -149,6 +148,7 @@ Soft-delete a project by default. The project is marked with a `deletedAt` times
 
 **Errors:**
 - `404` — Project not found
+- `409` — An active sync or archive operation is in progress for this project
 
 ## Restore Deleted Project
 
@@ -268,7 +268,7 @@ Start a restore operation (download files from cloud, remove stub).
 }
 ```
 
-The restore endpoint also supports optional single-file restore via a `filePath` body parameter.
+The restore endpoint also supports optional single-file restore via a `filePath` body parameter. The `filePath` must be a relative path and is validated: no null bytes, no `..` segments, no glob metacharacters (`*`, `?`, `[`, `]`, `{`, `}`, `\`), no leading `/`, and max 4096 characters.
 
 **Errors:**
 - `400` — Project is not archived
@@ -302,6 +302,7 @@ Request cleanup of backup files created by `--backup-dir` during sync operations
 ```
 
 **Errors:**
+- `400` — Invalid `olderThanDays` value (must be a positive integer)
 - `404` — Project not found
 
 ## List Trash
