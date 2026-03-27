@@ -36,7 +36,7 @@ X-Agent-Token: <agent-token>
 
 Agents receive a unique token upon registration (`POST /api/sync/agents`). The heartbeat endpoint (`POST /api/sync/agents/:id/heartbeat`) authenticates using this per-agent token via the `X-Agent-Token` header instead of the primary API key. The raw token is returned only once during registration; the server stores its SHA-256 hash.
 
-**Development mode** (`SYNC_SKIP_AUTH=1`): Authentication is bypassed for requests from loopback addresses only. A loud warning is logged on startup. This is NOT based on `NODE_ENV`.
+**Development mode** (`SYNC_SKIP_AUTH=1`): Authentication is bypassed for requests from loopback addresses only (`127.0.0.1`, `localhost`, `::1`). The server refuses to start if `SYNC_SKIP_AUTH=1` is combined with a non-loopback `SYNC_HOST` (e.g., `0.0.0.0`). A loud warning is logged on startup. This is NOT based on `NODE_ENV`.
 
 ### Plugin Mode
 
@@ -132,7 +132,7 @@ Input validated with Zod schemas at the route level:
 
 | Input | Rules |
 | --- | --- |
-| Project ID | Lowercase alphanumeric and hyphens only (`^[a-z0-9-]+$`), 1-100 chars |
+| Project ID | Lowercase alphanumeric and hyphens only, must start with alphanumeric (`^[a-z0-9][a-z0-9-]*$`), 1-100 chars |
 | Project name | 1-100 characters, no control characters |
 | Remote path | No null bytes, no `..`, max 4096 chars |
 | Provider type | One of: `spaces`, `s3`, `gcs`, `azure`, `b2`, `custom`, `local` |

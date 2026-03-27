@@ -174,6 +174,8 @@ export interface RcloneSyncOptions {
   readonly bucket: string;
   readonly includes: readonly string[];
   readonly excludes: readonly string[];
+  /** Path to an rclone --exclude-from file. When set, takes precedence over `excludes`. */
+  readonly excludeFromPath?: string;
   readonly bandwidthLimit?: string;
   readonly softDelete?: SoftDeleteConfig;
   readonly onProgress?: (progress: SyncProgress) => void;
@@ -190,6 +192,8 @@ export interface RcloneBisyncOptions {
   readonly bucket: string;
   readonly includes: readonly string[];
   readonly excludes: readonly string[];
+  /** Path to an rclone --exclude-from file. When set, takes precedence over `excludes`. */
+  readonly excludeFromPath?: string;
   readonly bandwidthLimit?: string;
   readonly resync: boolean;
   readonly conflictStrategy: ConflictStrategy;

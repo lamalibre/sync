@@ -19,7 +19,7 @@ import {
   DEFAULT_LOW_LEVEL_RETRIES,
 } from '@lamalibre/sync-shared';
 import { createProgressParser } from './progress-parser.js';
-import { buildIncludeFlags, buildExcludeFlags, buildBandwidthFlags, buildRcloneEnv, sanitizeRcloneError } from './rclone-runner.js';
+import { buildIncludeFlags, buildExcludeFlags, buildExcludeFromFlags, buildBandwidthFlags, buildRcloneEnv, sanitizeRcloneError } from './rclone-runner.js';
 import { buildRemoteTrashPath } from './trash-paths.js';
 import { scanDirectory, buildStubData, writeStub, readStub, STUB_FILENAME } from './stub.js';
 import type { SyncProgress, SoftDeleteConfig, ProviderType } from './types.js';
@@ -40,6 +40,8 @@ export interface ArchiveOptions {
   readonly provider: ProviderType;
   readonly includes: readonly string[];
   readonly excludes: readonly string[];
+  /** Path to an rclone --exclude-from file. When set, takes precedence over `excludes`. */
+  readonly excludeFromPath?: string;
   readonly bandwidthLimit?: string;
   readonly softDelete?: SoftDeleteConfig;
   readonly onProgress?: (progress: SyncProgress) => void;
@@ -117,8 +119,10 @@ export async function runArchive(
       '--low-level-retries',
       DEFAULT_LOW_LEVEL_RETRIES,
       '--delete-empty-src-dirs',
-      ...buildIncludeFlags(options.includes),
-      ...buildExcludeFlags(options.excludes),
+      ...buildIncludeFlags(options.includes, archiveLogger),
+      ...(options.excludeFromPath
+        ? buildExcludeFromFlags(options.excludeFromPath)
+        : buildExcludeFlags(options.excludes, archiveLogger)),
       // Exclude the stub file from being moved
       '--exclude',
       STUB_FILENAME,

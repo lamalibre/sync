@@ -76,3 +76,14 @@ export {
   type ApprovedPathsFile,
   type ProjectInfo,
 } from './approved-paths.js';
+
+export {
+  resolveIgnorePatterns,
+  parseIgnoreFileContent,
+  gitignoreToRclone,
+  BUILTIN_EXCLUDES,
+  type ResolvedIgnorePatterns,
+  type IgnoreResolverOptions,
+} from './ignore-resolver.js';
+
+export { writeExcludeFromFile } from './ignore-file-writer.js';

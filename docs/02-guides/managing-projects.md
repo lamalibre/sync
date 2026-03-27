@@ -43,7 +43,7 @@ curl -X POST http://localhost:9393/api/sync/projects \
     "watch": true,
     "trigger": "watch+schedule",
     "schedule": "0 */6 * * *",
-    "excludes": [".DS_Store", "*.tmp", "__pycache__", "node_modules/", ".git/"],
+    "excludes": ["*.bak", "scratch/"],
     "encrypted": true,
     "encryptionPassword": "strong-passphrase-here",
     "conflictStrategy": "newest-wins",
@@ -51,6 +51,8 @@ curl -X POST http://localhost:9393/api/sync/projects \
     "bandwidthLimit": "10M"
   }'
 ```
+
+> **Note:** You don't need to manually exclude `node_modules`, `.git`, `.DS_Store`, `__pycache__`, etc. The agent automatically applies a comprehensive set of built-in excludes and also respects `.gitignore`, `.dockerignore`, and `.syncignore` files in the project directory. Use `excludes` only for project-specific patterns not covered by these sources.
 
 ### Project Fields
 
@@ -62,7 +64,7 @@ curl -X POST http://localhost:9393/api/sync/projects \
 | `watch` | No | `false` | Enable file watching (chokidar) |
 | `trigger` | No | `manual` | `manual`, `watch`, `schedule`, or `watch+schedule` |
 | `schedule` | No | `null` | Cron expression (e.g., `0 */6 * * *`) |
-| `excludes` | No | `[".git", ".DS_Store", "*.tmp"]` | Glob patterns to skip |
+| `excludes` | No | `[]` | Additional glob patterns to skip (on top of built-in defaults and `.gitignore`/`.syncignore`) |
 | `includes` | No | `[]` | Glob patterns to include (overrides excludes) |
 | `encrypted` | No | `false` | Enable client-side encryption |
 | `encryptionPassword` | No | — | Per-project encryption password (min 12 chars) |

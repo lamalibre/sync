@@ -161,7 +161,7 @@ All REST inputs validated with Zod schemas at the route level:
 | Path fields (remote) | No null bytes, no `..`, max 4096 chars |
 | Path fields (local) | Validated on agent only — absolute, no null bytes, no `..`, max 4096 chars, must be in `approved-paths.json` |
 | Project name | 1-100 chars |
-| Project ID | Lowercase alphanumeric + hyphens only, 1-100 chars |
+| Project ID | Lowercase alphanumeric + hyphens only, must start with alphanumeric, 1-100 chars |
 | Provider type | One of: spaces, s3, gcs, azure, b2, custom, local |
 | Cron expression | Valid 5-field cron syntax (no seconds field) |
 | Encryption password | Min 12 characters |
@@ -173,14 +173,17 @@ All REST inputs validated with Zod schemas at the route level:
 All external process calls use execa with array arguments:
 
 ```javascript
-// CORRECT: array arguments, safe with special characters
-await execa('rclone', ['sync', localPath, remotePath, '--config', configPath]);
+// CORRECT: array arguments + env-based config, safe with special characters
+await execa('rclone', ['sync', localPath, remotePath], {
+  env: buildRcloneEnv(configPath),  // RCLONE_CONFIG via env, not CLI
+  extendEnv: false,                 // prevent leaking parent env vars
+});
 
 // WRONG: string interpolation, command injection risk
 await exec(`rclone sync ${localPath} ${remotePath}`);  // NEVER
 ```
 
-This is enforced project-wide. The `child_process` module and string interpolation for commands are prohibited.
+This is enforced project-wide. The `child_process` module and string interpolation for commands are prohibited. Config paths are passed via `RCLONE_CONFIG` environment variable to avoid exposure in process argument lists.
 
 ## Quick Reference
 

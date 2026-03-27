@@ -31,6 +31,11 @@ export interface FileWatcherOptions {
   readonly includes: readonly string[];
   /** Glob patterns to exclude from watching. */
   readonly excludes: readonly string[];
+  /**
+   * Pre-resolved chokidar ignore patterns from the ignore resolver.
+   * When provided, these are used instead of building patterns from `excludes`.
+   */
+  readonly resolvedChokidarPatterns?: readonly (string | RegExp)[];
   /** Debounce interval in milliseconds (default: 5000). */
   readonly debounceMs?: number;
   /** Callback when changes are detected after debounce. */
@@ -70,8 +75,11 @@ export class FileWatcher {
     // Build include matchers — when non-empty, only matching files trigger sync
     this.includeMatchers = buildIncludeMatchers(options.includes);
 
-    // Build chokidar-compatible ignore patterns
-    const ignored = buildIgnorePatterns(options.excludes, this.localPath);
+    // Use pre-resolved patterns from the ignore resolver when available,
+    // otherwise fall back to inline pattern building from excludes.
+    const ignored = options.resolvedChokidarPatterns
+      ? [...options.resolvedChokidarPatterns]
+      : buildIgnorePatterns(options.excludes, this.localPath);
 
     // Create the chokidar watcher eagerly so it is ready when start() is called.
     // stop() handles cleanup if start() is never called.

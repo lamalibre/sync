@@ -13,7 +13,7 @@
 | **chokidar** | Node.js file watching library used to detect local file changes. Uses native OS events (FSEvents on macOS, inotify on Linux). |
 | **Config bundle** | An encrypted package from Portlama containing server URL, credentials, and project definitions. Used for agent enrollment in plugin mode. |
 | **Conflict** | When the same file changes on both local and cloud between syncs. Detected by `rclone bisync`. Resolved by the project's conflict strategy. |
-| **Conflict strategy** | How to resolve bidirectional sync conflicts: `newest-wins` (most recent mtime), `local-wins`, `remote-wins`, or `manual` (keep both in `.sync-conflicts/`). |
+| **Conflict strategy** | How to resolve bidirectional sync conflicts: `newest-wins` (most recent mtime), `local-wins`, `remote-wins`, or `manual` (keep both in-place with numeric suffixes). |
 | **Cron expression** | A 5-field time specification for scheduled syncs: minute hour day month weekday. Example: `0 */6 * * *` = every 6 hours. |
 | **Debounce** | Collecting file change events over a time window (default 5 seconds) before triggering a sync. Prevents rapid-fire syncs from burst operations. |
 | **Delta sync** | Transferring only changed bytes rather than entire files. Handled by rclone using checksums and modification times. |

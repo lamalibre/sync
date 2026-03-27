@@ -26,6 +26,8 @@ Directory mode: `0700`
 | `sync-state.json` | `0600` | Per-project sync tracking (last sync time, bisync baseline) |
 | `approved-paths.json` | `0600` | Project-to-local-path mapping (set via `sync agent-approve`) |
 | `pending-syncs/` | `0700` | Dry-run preview files for sync confirm mode (auto-expires after 1 hour) |
+| `exclude-filters/` | `0700` | Per-project rclone `--exclude-from` files (auto-generated from ignore resolver) |
+| `exclude-filters/<id>.exclude` | `0600` | Merged exclude patterns for a project (built-in + `.gitignore` + `.dockerignore` + `.syncignore` + API excludes) |
 
 Directory mode: `0700`
 

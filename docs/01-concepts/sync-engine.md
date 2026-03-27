@@ -42,7 +42,7 @@ When the same file changes on both local and cloud between syncs, rclone bisync 
 | **newest-wins** | Keeps the version with the most recent modification time. Default and safest. |
 | **local-wins** | Local version always takes precedence. |
 | **remote-wins** | Cloud version always takes precedence. |
-| **manual** | Both versions are kept. The conflict is moved to a `.sync-conflicts/` directory for you to resolve. |
+| **manual** | Both versions are kept in-place with numeric suffixes (e.g., `file.txt` and `file.txt..path1`) for you to resolve manually. |
 
 ### Bandwidth Throttling
 
@@ -51,25 +51,61 @@ Limit how much bandwidth rclone uses per project:
 - `"10M"` — 10 MB/s maximum
 - `"500k"` — 500 KB/s maximum
 - `"08:00,10M 18:00,50M"` — 10 MB/s during the day, 50 MB/s at night (supported by rclone but not currently accepted by the Sync API validation — use simple values like `10M`)
-- `"0"` or omit — unlimited
+- Omit — unlimited (note: `"0"` is not accepted by the API validation; simply omit the field for unlimited bandwidth)
 
 Passed to rclone as the `--bwlimit` flag.
 
-### Exclude Patterns
+### Ignore / Exclude System
 
-Each project can define glob patterns to skip:
+Sync uses a **layered ignore system** that merges patterns from multiple sources. All layers are additive — each can only add exclusions, not remove them.
+
+#### Resolution Order
+
+| Layer | Source | Scope |
+| --- | --- | --- |
+| 1. **Built-in defaults** | Always applied | `node_modules`, `.git`, `__pycache__`, `.venv`, `target`, `build`, `.DS_Store`, `Thumbs.db`, `*.tmp`, `*.log`, editor dirs, etc. |
+| 2. **`.gitignore`** | Parsed from the project's local directory | Root + nested (each scoped to its directory). Nested `.gitignore` files are discovered automatically. |
+| 3. **`.dockerignore`** | Parsed from the project root | Root only |
+| 4. **`.syncignore`** | Custom per-project file (gitignore syntax) | Root only |
+| 5. **API excludes** | `project.excludes` from server config | Per-project, set via API or CLI |
+
+#### `.syncignore`
+
+Place a `.syncignore` file in your project root to define custom exclusions using gitignore syntax:
+
+```gitignore
+# Large datasets — sync manually
+datasets/raw/
+
+# Temporary build output
+.cache/
+*.wasm
+
+# IDE workspace files
+*.code-workspace
+```
+
+The file is resolved dynamically before each sync — edits take effect without restarting the agent.
+
+#### API Excludes
+
+Projects can also define exclude patterns via the API. These are merged on top of the other layers:
 
 ```json
 {
-  "excludes": [".DS_Store", "*.tmp", "__pycache__", "node_modules/", ".git/"]
+  "excludes": ["*.bak", "scratch/"]
 }
 ```
 
-Passed to rclone as `--exclude` flags. Patterns follow rclone's filter syntax (glob-based, `/` suffix matches directories).
+#### How Patterns Reach rclone
+
+All resolved patterns are written to a per-project `--exclude-from` file (atomically, in the agent directory). rclone reads this file instead of receiving hundreds of individual `--exclude` arguments. This handles large pattern sets without hitting OS argument length limits.
+
+Patterns follow rclone's filter syntax: glob-based, `**` for recursive directory match, leading `/` for anchored paths.
 
 ### Default rclone Settings
 
-Push and pull sync operations use these defaults (bisync uses `--verbose` instead of `--transfers`/`--checkers`/`--stats`):
+Push and pull sync operations use these defaults (bisync uses `--verbose` instead of `--progress`/`--stats-one-line`/`--transfers`/`--checkers`/`--stats`, but still uses `--retries` and `--low-level-retries`):
 
 | Setting | Value | Purpose |
 | --- | --- | --- |
@@ -90,14 +126,21 @@ execa('rclone', [
   'sync',
   localPath,
   `sync-remote:${bucket}/${remotePath}`,
-  '--config', configPath,
+  '--progress',
+  '--stats-one-line',
+  '--stats', '2s',
   '--transfers', '4',
   '--checkers', '8',
-  '--stats', '2s',
   '--retries', '3',
   '--low-level-retries', '10',
-  ...excludeFlags
-])
+  ...includeFlags,
+  '--exclude-from', excludeFilterPath,
+  ...bandwidthFlags,
+  ...backupDirFlags,
+], {
+  env: buildRcloneEnv(configPath),  // RCLONE_CONFIG passed via env, not CLI
+  extendEnv: false,
+})
 ```
 
 This is a critical security requirement. Paths may contain spaces, quotes, and special characters. String interpolation would create command injection vulnerabilities.
@@ -148,7 +191,7 @@ Progress is reported via agent heartbeats so the server can expose real-time sta
 chokidar.watch(localPath, {
   followSymlinks: false,           // security: don't follow symlinks
   usePolling: false,               // use native OS events
-  ignored: buildIgnorePatterns(),  // excludes + hidden files
+  ignored: resolvedChokidarPatterns,  // from ignore resolver
   ignoreInitial: true,             // skip existing files on startup
   ignorePermissionErrors: true,
   awaitWriteFinish: {
@@ -157,6 +200,8 @@ chokidar.watch(localPath, {
   }
 })
 ```
+
+The ignore resolver converts all merged patterns (built-in + `.gitignore` + `.dockerignore` + `.syncignore` + API excludes) into chokidar-compatible RegExp patterns. This means the file watcher respects the same ignore rules as rclone — a file ignored for sync is also ignored by the watcher.
 
 Events (`add`, `change`, `unlink`) are collected over the debounce window (default 5 seconds). The timer resets on each new event. After the window expires, the accumulated changes trigger a single sync.
 

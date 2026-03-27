@@ -90,6 +90,25 @@ export function buildExcludeFlags(excludes: readonly string[], logger?: Logger):
 }
 
 /**
+ * Build exclude flags using an --exclude-from file.
+ * Preferred over buildExcludeFlags when the ignore resolver has produced
+ * a filter file (handles large pattern sets without hitting arg length limits).
+ */
+export function buildExcludeFromFlags(excludeFromPath: string): string[] {
+  return ['--exclude-from', excludeFromPath];
+}
+
+/**
+ * Build the appropriate exclude flags — prefers --exclude-from when available.
+ */
+function resolveExcludeFlags(options: { excludeFromPath?: string; excludes: readonly string[] }, logger?: Logger): string[] {
+  if (options.excludeFromPath) {
+    return buildExcludeFromFlags(options.excludeFromPath);
+  }
+  return buildExcludeFlags(options.excludes, logger);
+}
+
+/**
  * Build the bandwidth limit flags.
  * Returns empty array if no limit is set.
  */
@@ -198,8 +217,8 @@ export async function runRcloneSync(
     DEFAULT_RETRIES,
     '--low-level-retries',
     DEFAULT_LOW_LEVEL_RETRIES,
-    ...buildIncludeFlags(options.includes),
-    ...buildExcludeFlags(options.excludes),
+    ...buildIncludeFlags(options.includes, syncLogger),
+    ...resolveExcludeFlags(options, syncLogger),
     ...buildBandwidthFlags(options.bandwidthLimit),
     ...(agentDir ? buildBackupDirFlags(options, agentDir) : []),
   ];
@@ -326,8 +345,8 @@ export async function runRcloneDryRun(
     DEFAULT_RETRIES,
     '--low-level-retries',
     DEFAULT_LOW_LEVEL_RETRIES,
-    ...buildIncludeFlags(options.includes),
-    ...buildExcludeFlags(options.excludes),
+    ...buildIncludeFlags(options.includes, syncLogger),
+    ...resolveExcludeFlags(options, syncLogger),
   ];
 
   syncLogger.info({ source, destination }, 'Starting rclone dry-run');
@@ -339,8 +358,7 @@ export async function runRcloneDryRun(
 
   try {
     const childProcess = execa('rclone', args, {
-      cancelSignal: abortSignal,
-      gracefulCancel: true,
+      ...(abortSignal ? { cancelSignal: abortSignal, gracefulCancel: true } : {}),
       env: buildRcloneEnv(options.rcloneConfigPath),
       extendEnv: false,
       stdout: 'pipe',
@@ -419,8 +437,8 @@ export async function runRcloneProtectedPull(
     DEFAULT_RETRIES,
     '--low-level-retries',
     DEFAULT_LOW_LEVEL_RETRIES,
-    ...buildIncludeFlags(options.includes),
-    ...buildExcludeFlags(options.excludes),
+    ...buildIncludeFlags(options.includes, syncLogger),
+    ...resolveExcludeFlags(options, syncLogger),
     ...buildBandwidthFlags(options.bandwidthLimit),
   ];
 
@@ -619,8 +637,8 @@ export async function runRcloneBisync(
     DEFAULT_RETRIES,
     '--low-level-retries',
     DEFAULT_LOW_LEVEL_RETRIES,
-    ...buildIncludeFlags(options.includes),
-    ...buildExcludeFlags(options.excludes),
+    ...buildIncludeFlags(options.includes, syncLogger),
+    ...resolveExcludeFlags(options, syncLogger),
     ...buildBandwidthFlags(options.bandwidthLimit),
     ...buildConflictFlags(options.conflictStrategy),
     ...(agentDir ? buildBisyncBackupDirFlags(options, agentDir) : []),

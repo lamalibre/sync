@@ -91,10 +91,14 @@ export function registerAuthHook(app: FastifyInstance): void {
   if (skipAuth) {
     // Refuse to start with auth disabled on a non-loopback address.
     // This prevents accidentally exposing an unauthenticated server to the network.
+    // Positive allowlist: only permit auth skip on known loopback addresses.
+    // 0.0.0.0 and :: bind to all interfaces and MUST be blocked.
+    const LOOPBACK_HOSTS = new Set(['127.0.0.1', 'localhost', '::1']);
     const host = process.env['SYNC_HOST'] ?? '127.0.0.1';
-    if (host !== '127.0.0.1' && host !== 'localhost' && host !== '::1') {
+    if (!LOOPBACK_HOSTS.has(host)) {
       throw new Error(
         'SYNC_SKIP_AUTH cannot be used with a non-loopback SYNC_HOST. ' +
+          `Host "${host}" is not a known loopback address (${[...LOOPBACK_HOSTS].join(', ')}). ` +
           'This would expose an unauthenticated server to the network.',
       );
     }

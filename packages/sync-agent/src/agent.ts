@@ -27,9 +27,12 @@ import {
   getAccessMode,
   getConfirmMode,
   getDeleteThreshold,
+  resolveIgnorePatterns,
+  writeExcludeFromFile,
   type ApprovedPathsFile,
   type AccessMode,
   type ProjectInfo,
+  type ResolvedIgnorePatterns,
 } from '@lamalibre/sync-shared';
 import { ServerClient } from './lib/server-client.js';
 import {
@@ -374,6 +377,40 @@ export class Agent {
   }
 
   /**
+   * Resolve ignore patterns for a project and write the --exclude-from file.
+   *
+   * Merges built-in defaults, .gitignore, .dockerignore, .syncignore,
+   * and per-project API excludes into a single set of patterns that feeds
+   * both rclone (via --exclude-from) and chokidar (via regex patterns).
+   *
+   * Called dynamically before each sync so changes to ignore files take
+   * effect without restarting the agent.
+   */
+  private async resolveProjectIgnorePatterns(
+    project: ProjectDefinition,
+    localPath: string,
+  ): Promise<{ excludeFromPath: string; resolved: ResolvedIgnorePatterns }> {
+    const resolved = await resolveIgnorePatterns({
+      localPath,
+      projectExcludes: project.excludes,
+      logger: this.logger,
+    });
+
+    const excludeFromPath = await writeExcludeFromFile(
+      this.agentDir,
+      project.id,
+      resolved.rclonePatterns,
+    );
+
+    this.logger.debug(
+      { projectId: project.id, patternCount: resolved.rclonePatterns.length },
+      'Resolved ignore patterns',
+    );
+
+    return { excludeFromPath, resolved };
+  }
+
+  /**
    * Resolve the effective sync direction after applying the access mode override.
    * Returns null if the access mode blocks the operation entirely.
    */
@@ -442,6 +479,7 @@ export class Agent {
     localPath: string,
     operationId: string,
     trigger: 'manual' | 'watch' | 'schedule',
+    excludeFromPath?: string,
   ): Promise<string | null> {
     if (!this.currentConfig) return null;
 
@@ -473,6 +511,7 @@ export class Agent {
         bucket: this.currentConfig.provider.bucket,
         includes: project.includes,
         excludes: project.excludes,
+        excludeFromPath,
         bandwidthLimit,
         softDelete: project.softDelete,
         onProgress: (progress) => {
@@ -502,6 +541,7 @@ export class Agent {
     effectiveDirection: SyncDirection,
     operationId: string,
     trigger: 'manual' | 'watch' | 'schedule',
+    excludeFromPath?: string,
   ): Promise<'proceed' | 'waiting' | 'pending'> {
     if (!this.currentConfig) return 'proceed';
 
@@ -563,6 +603,7 @@ export class Agent {
           bucket: this.currentConfig.provider.bucket,
           includes: project.includes,
           excludes: project.excludes,
+          excludeFromPath,
         },
         this.logger,
         this.agentDir,
@@ -700,6 +741,9 @@ export class Agent {
 
     const operationId = pendingOperationId ?? generateOperationId();
 
+    // --- Resolve ignore patterns (built-in + .gitignore + .syncignore + API excludes) ---
+    const { excludeFromPath } = await this.resolveProjectIgnorePatterns(project, localPath);
+
     // --- Access mode enforcement ---
     const accessMode = getAccessMode(this.approvedPaths, projectId);
     const effectiveDirection = this.resolveEffectiveDirection(
@@ -715,13 +759,13 @@ export class Agent {
 
     // --- Protected mode: use rclone copy --ignore-existing ---
     if (accessMode === 'protected') {
-      return this.triggerProtectedPull(project, localPath, operationId, trigger);
+      return this.triggerProtectedPull(project, localPath, operationId, trigger, excludeFromPath);
     }
 
     // --- Sync preview / dry-run decision ---
     if (!skipPreview) {
       const previewResult = await this.checkSyncPreview(
-        project, localPath, effectiveDirection, operationId, trigger,
+        project, localPath, effectiveDirection, operationId, trigger, excludeFromPath,
       );
       if (previewResult === 'waiting') {
         return null; // Pending sync saved, waiting for approval
@@ -765,6 +809,7 @@ export class Agent {
           bucket: this.currentConfig.provider.bucket,
           includes: project.includes,
           excludes: project.excludes,
+          excludeFromPath,
           bandwidthLimit,
           resync: false, // Will be overridden by executeBisyncOperation based on state
           conflictStrategy: project.conflictStrategy ?? 'newest-wins',
@@ -793,6 +838,7 @@ export class Agent {
           bucket: this.currentConfig.provider.bucket,
           includes: project.includes,
           excludes: project.excludes,
+          excludeFromPath,
           bandwidthLimit,
           softDelete: project.softDelete,
           onProgress: (progress) => {
@@ -856,6 +902,19 @@ export class Agent {
     }
 
     const operationId = pendingOperationId ?? generateOperationId();
+
+    const remoteName = getProjectRemoteName(
+      project,
+      this.currentConfig.provider,
+      this.cryptRemoteMap,
+    );
+
+    const bandwidthLimit = project.bandwidthLimit ?? this.currentConfig.defaultBandwidthLimit;
+
+    // Resolve ignore patterns BEFORE registering active sync to avoid
+    // leaking an activeSyncs entry if resolution throws.
+    const { excludeFromPath } = await this.resolveProjectIgnorePatterns(project, localPath);
+
     const abortController = new AbortController();
     const activeSync: ActiveSync = {
       operationId,
@@ -865,14 +924,6 @@ export class Agent {
       trigger: 'manual',
     };
     this.activeSyncs.set(projectId, activeSync);
-
-    const remoteName = getProjectRemoteName(
-      project,
-      this.currentConfig.provider,
-      this.cryptRemoteMap,
-    );
-
-    const bandwidthLimit = project.bandwidthLimit ?? this.currentConfig.defaultBandwidthLimit;
 
     // Run archive in background
     void this.executeArchiveOperation(
@@ -887,6 +938,7 @@ export class Agent {
         provider: this.currentConfig.provider.type,
         includes: project.includes,
         excludes: project.excludes,
+        excludeFromPath,
         bandwidthLimit,
         softDelete: project.softDelete,
         onProgress: (progress) => {
@@ -1326,11 +1378,17 @@ export class Agent {
           'Detected server-initiated operation, triggering',
         );
         if (opType === 'archive') {
-          void this.triggerArchive(project.id, project.pendingOperationId);
+          this.triggerArchive(project.id, project.pendingOperationId).catch((err: unknown) => {
+            this.logger.error({ projectId: project.id, err: err instanceof Error ? err.message : String(err) }, 'Failed to trigger archive');
+          });
         } else if (opType === 'restore') {
-          void this.triggerRestore(project.id, project.pendingOperationId);
+          this.triggerRestore(project.id, project.pendingOperationId).catch((err: unknown) => {
+            this.logger.error({ projectId: project.id, err: err instanceof Error ? err.message : String(err) }, 'Failed to trigger restore');
+          });
         } else {
-          void this.triggerSync(project.id, project.pendingDirection, 'manual', project.pendingOperationId);
+          this.triggerSync(project.id, project.pendingDirection, 'manual', project.pendingOperationId).catch((err: unknown) => {
+            this.logger.error({ projectId: project.id, err: err instanceof Error ? err.message : String(err) }, 'Failed to trigger sync');
+          });
         }
       }
     }
@@ -1365,10 +1423,18 @@ export class Agent {
       }
     }
 
-    // Start watchers for projects that need them and don't have one
+    // Start watchers for projects that need them and don't have one.
+    // Each watcher is isolated so one project's failure does not block others.
     for (const project of projects) {
       if (projectsNeedingWatch.has(project.id) && !this.fileWatchers.has(project.id)) {
-        this.startWatcher(project);
+        try {
+          await this.startWatcher(project);
+        } catch (err: unknown) {
+          this.logger.error(
+            { projectId: project.id, err: err instanceof Error ? err.message : String(err) },
+            'Failed to start file watcher',
+          );
+        }
       }
     }
   }
@@ -1394,7 +1460,7 @@ export class Agent {
   /**
    * Start a file watcher for a project.
    */
-  private startWatcher(project: ProjectDefinition): void {
+  private async startWatcher(project: ProjectDefinition): Promise<void> {
     const localPath = this.resolveLocalPath(project.id);
     if (!localPath) {
       this.logger.warn(
@@ -1409,11 +1475,15 @@ export class Agent {
       'Starting file watcher for project',
     );
 
+    // Resolve ignore patterns so the watcher skips excluded paths
+    const { resolved } = await this.resolveProjectIgnorePatterns(project, localPath);
+
     const watcher = new FileWatcher({
       projectId: project.id,
       localPath,
       includes: project.includes,
       excludes: project.excludes,
+      resolvedChokidarPatterns: resolved.chokidarPatterns,
       debounceMs: project.watchDebounceMs,
       onChanges: (projectId: string, changedFiles: readonly string[]) => {
         this.handleWatchTrigger(projectId, changedFiles);
@@ -1459,7 +1529,9 @@ export class Agent {
       return;
     }
 
-    void this.triggerSync(projectId, undefined, 'watch');
+    this.triggerSync(projectId, undefined, 'watch').catch((err: unknown) => {
+      this.logger.error({ projectId, err: err instanceof Error ? err.message : String(err) }, 'Failed to trigger watch sync');
+    });
   }
 
   // ---------------------------------------------------------------------------
@@ -1889,7 +1961,9 @@ export class Agent {
     if (pendingTrigger) {
       this.pendingSyncs.delete(projectId);
       this.logger.info({ projectId, trigger: pendingTrigger }, 'Processing queued sync');
-      void this.triggerSync(projectId, undefined, pendingTrigger);
+      this.triggerSync(projectId, undefined, pendingTrigger).catch((err: unknown) => {
+        this.logger.error({ projectId, err: err instanceof Error ? err.message : String(err) }, 'Failed to trigger pending sync');
+      });
     }
   }
 }

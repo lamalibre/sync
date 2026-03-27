@@ -180,7 +180,7 @@ export const projectCreateSchema = z.object({
     )
     .max(100)
     .optional()
-    .default(['.git', '.DS_Store', '*.tmp']),
+    .default([]),
   schedule: cronSchema.nullable().optional().default(null),
   encrypted: z.boolean().optional().default(false),
   /**

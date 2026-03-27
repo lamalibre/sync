@@ -63,7 +63,11 @@ These three pieces interact through a polling loop: the agent checks the server 
        │                │  ├─ cached-config.json   (encrypted cache)       │
        │                │  ├─ rclone.conf          (generated, 0600)       │
        │                │  ├─ master.key           (local encryption key)  │
-       │                │  └─ sync-state.json      (per-project state)     │
+       │                │  ├─ approved-paths.json  (project→path mapping)  │
+       │                │  ├─ bisync-state.json    (per-project bisync)    │
+       │                │  ├─ pending-syncs/       (sync preview state)    │
+       │                │  ├─ exclude-filters/     (rclone exclude files)  │
+       │                │  └─ .sync-trash/         (soft-delete trash)     │
        │                └──────────────────────────────────────────────────┘
        │
 ┌──────┴───────────────────────────┐
@@ -90,7 +94,7 @@ These three pieces interact through a polling loop: the agent checks the server 
 | **Sync Agent** | Node.js ESM, rclone, chokidar, node-cron, execa | Sync execution, file watching, scheduling, progress reporting |
 | **Sync CLI** | @clack/prompts, picocolors | Admin command-line interface |
 | **Create Sync** | esbuild bundled, zero deps | One-command installer (standalone + bundle) |
-| **Sync Shared** | TypeScript | Shared types, atomic writes, rclone config builder, rclone defaults |
+| **Sync Shared** | TypeScript | Shared types, atomic writes, rclone config builder, ignore resolver, approved paths, pending sync, error sanitization |
 
 ## Monorepo Structure
 
@@ -113,22 +117,36 @@ sync/
 │   │           ├── rclone-config.ts   ← rclone.conf generation
 │   │           ├── file-watcher.ts    ← chokidar file watching with debounce
 │   │           ├── scheduler.ts       ← node-cron scheduling
-│   │           ├── archive.ts         ← Archive scan and stub generation
+│   │           ├── archive.ts         ← Archive scan, stub generation, restore
 │   │           ├── bisync-state.ts    ← Bisync baseline tracking
+│   │           ├── dry-run-parser.ts  ← rclone --dry-run output parsing
+│   │           ├── stub.ts            ← .sync-stub.json read/write
+│   │           ├── trash-cleanup.ts   ← Periodic local + remote trash cleanup
+│   │           ├── trash-paths.ts     ← Timestamped trash directory paths
+│   │           ├── server-client.ts   ← HTTP communication with sync-server
+│   │           ├── config.ts          ← Agent settings and config cache
+│   │           ├── plugin-mode.ts     ← Portlama mTLS + ticket auth
 │   │           └── progress-parser.ts ← rclone stderr progress parsing
 │   │
 │   ├── sync-cli/                 ← Admin CLI
 │   │   └── src/
-│   │       ├── index.ts           ← Entry point and command dispatch
-│   │       └── commands/         ← status, trigger, archive, restore, config, projects, uninstall
+│   │       ├── index.ts          ← Entry point and command dispatch
+│   │       └── commands/         ← status, trigger, archive, restore, config, projects,
+│   │                                project-delete, project-restore, trash-list,
+│   │                                trash-restore, trash-purge, agent-approve, preview, uninstall
 │   │
 │   ├── sync-shared/              ← Shared utilities
 │   │   └── src/
-│   │       ├── types.ts          ← Domain types (provider, direction, strategy, trigger, status)
-│   │       ├── atomic-write.ts   ← Atomic file write (temp → fsync → rename)
-│   │       ├── rclone-config.ts  ← buildRcloneIni(), buildCryptIni()
+│   │       ├── types.ts           ← Domain types (provider, direction, strategy, trigger, status)
+│   │       ├── atomic-write.ts    ← Atomic file write (temp → fsync → rename)
+│   │       ├── rclone-config.ts   ← buildRcloneIni(), buildCryptIni()
 │   │       ├── rclone-defaults.ts ← Default rclone transfer settings
-│   │       └── cli-config.ts     ← CLI config encryption/decryption
+│   │       ├── cli-config.ts      ← CLI config encryption/decryption
+│   │       ├── ignore-resolver.ts ← 5-layer ignore resolution (.gitignore, .syncignore, etc.)
+│   │       ├── ignore-file-writer.ts ← Atomic rclone --exclude-from file writer
+│   │       ├── approved-paths.ts  ← Agent path approval, access modes, confirm modes
+│   │       ├── pending-sync.ts    ← Sync preview/confirm state management
+│   │       └── sanitize-error.ts  ← Credential redaction from rclone errors
 │   │
 │   └── create-sync/              ← npx installer
 │       └── src/lib/
@@ -221,6 +239,11 @@ At this scale (a handful of projects, a few agents), a database adds a process d
 | `~/.sync-agent/agent-settings.json` | Agent config (server URL, API key) |
 | `~/.sync-agent/rclone.conf` | Generated rclone config (credentials, mode 0600) |
 | `~/.sync-agent/cached-config.json` | Encrypted config cache (offline resilience) |
+| `~/.sync-agent/approved-paths.json` | Project-to-local-path mapping with access/confirm modes |
+| `~/.sync-agent/bisync-state.json` | Per-project bisync baseline + conflict tracking |
+| `~/.sync-agent/exclude-filters/` | Generated rclone `--exclude-from` files per project |
+| `~/.sync-agent/pending-syncs/` | Pending sync previews awaiting approval |
+| `~/.sync-agent/.sync-trash/` | Soft-delete trash (local side) |
 
 ## Related Documentation
 

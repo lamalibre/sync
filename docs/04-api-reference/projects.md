@@ -18,7 +18,7 @@ Create a new sync project.
   "watch": true,
   "trigger": "watch+schedule",
   "schedule": "0 */6 * * *",
-  "excludes": [".DS_Store", "*.tmp", "__pycache__"],
+  "excludes": ["*.bak", "scratch/"],
   "includes": [],
   "encrypted": true,
   "encryptionPassword": "strong-passphrase",

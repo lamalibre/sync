@@ -36,7 +36,7 @@ Build before considering a task complete. Avoid commands that hang (e.g., `npm s
 | Sync engine | rclone (external binary, 40+ providers) |
 | File watching | chokidar |
 | Process execution | execa (array args only) |
-| Shared | @lamalibre/sync-shared (types, atomic writes, rclone config) |
+| Shared | @lamalibre/sync-shared (types, atomic writes, rclone config, ignore resolver) |
 | CLI | @clack/prompts, picocolors |
 | Bundling | esbuild → zero runtime deps |
 | State | JSON files (atomic writes) |
@@ -60,6 +60,18 @@ Build before considering a task complete. Avoid commands that hang (e.g., `npm s
 - `@clack/prompts` for interactive prompts
 - `picocolors` for terminal output
 - Non-interactive mode via flags for CI/scripting
+
+## Ignore System
+
+The agent resolves ignore patterns from five layered sources before each sync:
+
+1. **Built-in defaults** — `node_modules/**`, `.git/**`, `__pycache__/**`, `.venv/**`, `target/**`, `build/**`, `.DS_Store`, `*.tmp`, `*.log`, editor dirs, etc.
+2. **`.gitignore`** — root + nested (each scoped to its directory)
+3. **`.dockerignore`** — root only
+4. **`.syncignore`** — custom per-project file, gitignore syntax
+5. **API excludes** — `project.excludes` from server config
+
+Resolved patterns are written to `~/.sync-agent/exclude-filters/<projectId>.exclude` and passed to rclone via `--exclude-from`. The same patterns feed chokidar's file watcher as RegExps. Resolution is dynamic — no restart needed when ignore files change.
 
 ## Critical Constraints
 

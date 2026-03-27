@@ -71,8 +71,8 @@ export type ConfirmMode = (typeof CONFIRM_MODES)[number];
 /** Default delete threshold: require confirmation if more than this many files would be deleted. */
 export const DEFAULT_DELETE_THRESHOLD = 10;
 
-/** Only lowercase alphanumeric characters and hyphens, max 100 characters. */
-export const PROJECT_ID_RE = /^[a-z0-9-]+$/;
+/** Only lowercase alphanumeric characters and hyphens, must start with alphanumeric. */
+export const PROJECT_ID_RE = /^[a-z0-9][a-z0-9-]*$/;
 export const PROJECT_ID_MAX_LENGTH = 100;
 
 // ---------------------------------------------------------------------------

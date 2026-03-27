@@ -47,6 +47,22 @@ The agent never stores project definitions or credentials permanently in plainte
    └── Abort any running rclone processes (via AbortController)
 ```
 
+## Ignore Pattern Resolution
+
+Before each sync operation (and before creating file watchers), the agent resolves ignore patterns from five sources into a single unified set:
+
+1. **Built-in defaults** — `node_modules/**`, `.git/**`, `__pycache__/**`, `target/**`, `.DS_Store`, `*.tmp`, `*.log`, etc.
+2. **`.gitignore`** files — root + nested, each scoped to their directory
+3. **`.dockerignore`** — root only
+4. **`.syncignore`** — custom per-project file using gitignore syntax
+5. **API excludes** — `project.excludes` from server config
+
+The resolved patterns are written to `~/.sync-agent/exclude-filters/<projectId>.exclude` (atomically, mode `0600`) and passed to rclone via `--exclude-from`. The same patterns are converted to RegExps for chokidar's file watcher.
+
+Resolution is dynamic — editing `.gitignore` or `.syncignore` takes effect on the next sync without restarting the agent. The exclude file is only rewritten when content actually changes (SHA-256 comparison).
+
+The directory walk for nested `.gitignore` discovery skips directories matched by built-in excludes (`node_modules`, `.git`, `target`, etc.) to avoid descending into heavy directories.
+
 ## rclone Operations
 
 ### Sync (Push/Pull)
@@ -56,15 +72,21 @@ execa('rclone', [
   'sync',
   source,               // local or remote
   destination,          // remote or local
-  '--config', configPath,
+  '--progress',
+  '--stats-one-line',
+  '--stats', '2s',
   '--transfers', '4',
   '--checkers', '8',
-  '--stats', '2s',
   '--retries', '3',
   '--low-level-retries', '10',
-  ...excludeFlags,
-  ...bandwidthFlag
-])
+  ...includeFlags,            // --include patterns + trailing --exclude '*'
+  '--exclude-from', excludeFilterPath,
+  ...bandwidthFlags,
+  ...backupDirFlags,          // --backup-dir for soft delete
+], {
+  env: buildRcloneEnv(configPath),  // RCLONE_CONFIG passed via env, not CLI
+  extendEnv: false,
+})
 ```
 
 **Push:** `source = localPath`, `destination = sync-remote:bucket/remotePath`
@@ -77,10 +99,19 @@ execa('rclone', [
   'bisync',
   localPath,
   `sync-remote:${bucket}/${remotePath}`,
-  '--config', configPath,
-  '--resync',           // only on first run
-  ...standardFlags
-])
+  '--verbose',
+  '--retries', '3',
+  '--low-level-retries', '10',
+  ...includeFlags,
+  '--exclude-from', excludeFilterPath,
+  ...bandwidthFlags,
+  ...conflictFlags,           // --conflict-resolve / --conflict-loser
+  ...bisyncBackupDirFlags,    // --backup-dir1 / --backup-dir2 for soft delete
+  '--resync',                 // only on first run
+], {
+  env: buildRcloneEnv(configPath),  // RCLONE_CONFIG passed via env, not CLI
+  extendEnv: false,
+})
 ```
 
 The agent tracks whether each project has been synced before. First run includes `--resync` to establish baseline.
@@ -92,10 +123,23 @@ execa('rclone', [
   'move',
   localPath,
   `sync-remote:${bucket}/${remotePath}`,
+  '--progress',
+  '--stats-one-line',
+  '--stats', '2s',
+  '--transfers', '4',
+  '--checkers', '8',
+  '--retries', '3',
+  '--low-level-retries', '10',
   '--delete-empty-src-dirs',
+  ...includeFlags,
+  '--exclude-from', excludeFilterPath,
   '--exclude', '.sync-stub.json',
-  ...standardFlags
-])
+  ...bandwidthFlags,
+  ...backupDirFlags,               // --backup-dir for soft delete
+], {
+  env: buildRcloneEnv(configPath),  // RCLONE_CONFIG passed via env, not CLI
+  extendEnv: false,
+})
 ```
 
 After move completes, the agent creates `.sync-stub.json` with archive metadata.
@@ -107,8 +151,18 @@ execa('rclone', [
   'copy',
   `sync-remote:${bucket}/${remotePath}`,
   localPath,
-  ...standardFlags
-])
+  '--progress',
+  '--stats-one-line',
+  '--stats', '2s',
+  '--transfers', '4',
+  '--checkers', '8',
+  '--retries', '3',
+  '--low-level-retries', '10',
+  ...bandwidthFlags,
+], {
+  env: buildRcloneEnv(configPath),  // RCLONE_CONFIG passed via env, not CLI
+  extendEnv: false,
+})
 ```
 
 After copy completes, the agent removes `.sync-stub.json`.
@@ -122,8 +176,7 @@ chokidar watches project directories for changes:
 - `usePolling: false` — use native OS events (FSEvents on macOS, inotify on Linux)
 - `ignoreInitial: true` — don't fire for existing files on startup
 - `awaitWriteFinish.stabilityThreshold: 500` — wait 500ms for writes to complete
-- Hidden files (starting with `.`) ignored by default
-- Project excludes applied as chokidar ignore patterns
+- Ignore patterns from the full ignore resolver (built-in + `.gitignore` + `.dockerignore` + `.syncignore` + API excludes) converted to RegExps for chokidar
 
 ### Debounce Logic
 
@@ -202,6 +255,18 @@ The config is regenerated idempotently — the output is the same if nothing cha
 | `src/lib/config.ts` | Agent settings management |
 | `src/lib/plugin-mode.ts` | Portlama plugin mode support |
 | `src/lib/types.ts` | Agent-specific type definitions |
+
+### Shared (sync-shared)
+
+| File | Role |
+| --- | --- |
+| `src/ignore-resolver.ts` | Layered ignore resolution: built-in + `.gitignore` + `.dockerignore` + `.syncignore` + API excludes |
+| `src/ignore-file-writer.ts` | Atomic write of rclone `--exclude-from` filter files |
+| `src/rclone-config.ts` | rclone.conf generation from provider config |
+| `src/atomic-write.ts` | Atomic file writes (temp → fsync → rename) |
+| `src/approved-paths.ts` | Agent path approval and validation |
+| `src/pending-sync.ts` | Sync preview/confirm state management |
+| `src/types.ts` | Shared domain types (re-exported by all packages) |
 
 ## Related Documentation
 

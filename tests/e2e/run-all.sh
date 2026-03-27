@@ -78,6 +78,12 @@ TEST_SCRIPTS=(
   "12-plugin-mode.sh"
   "13-soft-delete.sh"
   "14-error-paths.sh"
+  "15-path-security.sh"
+  "16-ignore-system.sh"
+  "17-include-patterns.sh"
+  "18-single-file-restore-savings.sh"
+  "19-protected-confirm-destructive.sh"
+  "20-cli-commands.sh"
 )
 
 PASSED=0

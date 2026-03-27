@@ -27,8 +27,8 @@ responsibly through one of these channels:
 
 ### What to Expect
 
-- **Acknowledgment** within 48 hours
-- **Status update** within 7 days with an assessment and remediation timeline
+- **Acknowledgment** within 48 hours on a best-effort basis — this is a small-team-maintained project, so response times may vary
+- **Status update** within 7 days on a best-effort basis, with an assessment and remediation timeline
 - **Credit** in the release notes (unless you prefer to remain anonymous)
 
 ### What Qualifies
@@ -55,4 +55,4 @@ responsibly through one of these channels:
 
 We follow coordinated disclosure. We ask that you give us reasonable time to
 address the issue before any public disclosure. We aim to release fixes within
-30 days of a confirmed vulnerability.
+30 days of a confirmed vulnerability, but this is on a best-effort basis.
