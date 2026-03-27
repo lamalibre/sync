@@ -5,6 +5,20 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.1.2] - 2026-03-27
+
+### Added
+
+- Add 5-layer ignore pattern resolver — built-in defaults, `.gitignore`, `.dockerignore`, `.syncignore`, and API excludes merged into rclone `--exclude-from` files
+- Add atomic exclude-filter file writer with SHA-256 change detection to avoid unnecessary rewrites
+- Add E2E tests for ignore system, include patterns, single-file restore, aggregate savings, protected mode, confirm-destructive mode, and CLI commands (tests 16–20)
+
+### Fixed
+
+- Fix `execa` crash in rclone dry-run when no `AbortSignal` is provided — `gracefulCancel` was set without `cancelSignal`, breaking the entire confirm-destructive flow
+
+**Affected packages:** `@lamalibre/sync-agent` 0.1.1 → 0.1.2, `@lamalibre/sync-shared` 0.1.1 → 0.1.2
+
 ## [Unreleased]
 
 ### Added

@@ -1,6 +1,6 @@
 {
   "name": "@lamalibre/sync-shared",
-  "version": "0.1.1",
+  "version": "0.1.2",
   "description": "Shared utilities for Sync — types, atomic writes, rclone config generation, path validation",
   "type": "module",
   "license": "PolyForm-Noncommercial-1.0.0",
