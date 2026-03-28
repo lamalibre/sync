@@ -1,6 +1,6 @@
 {
   "name": "@lamalibre/create-sync",
-  "version": "0.1.1",
+  "version": "0.1.2",
   "description": "Create Sync — npx installer for setting up sync-server and sync-agent",
   "type": "module",
   "license": "PolyForm-Noncommercial-1.0.0",
