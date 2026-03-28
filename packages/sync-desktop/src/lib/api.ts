@@ -14,6 +14,11 @@ import type {
   OperationResponse,
   AgentListResponse,
   AgentResponse,
+  PreviewListResponse,
+  PreviewResponse,
+  TrashResponse,
+  ApprovedPathsResponse,
+  ApprovePathInput,
 } from './types.js';
 
 // ---------------------------------------------------------------------------
@@ -74,9 +79,11 @@ async function request<T>(path: string, options: RequestInit = {}): Promise<T> {
     headers,
   });
 
-  const body: unknown = await response.json();
-
   if (!response.ok) {
+    const body = (await response.json().catch(() => ({
+      error: `HTTP ${response.status}`,
+    }))) as unknown;
+
     const message =
       typeof body === 'object' &&
       body !== null &&
@@ -87,6 +94,8 @@ async function request<T>(path: string, options: RequestInit = {}): Promise<T> {
 
     throw new ApiRequestError(message, response.status, body);
   }
+
+  const body: unknown = await response.json();
 
   return body as T;
 }
@@ -136,10 +145,26 @@ export async function updateProject(
   });
 }
 
-export async function deleteProject(projectId: string): Promise<OperationResponse> {
-  return request<OperationResponse>(`/api/sync/projects/${encodeURIComponent(projectId)}`, {
-    method: 'DELETE',
-  });
+export async function deleteProject(
+  projectId: string,
+  permanent = false,
+): Promise<OperationResponse> {
+  const query = permanent ? '?permanent=true' : '';
+  return request<OperationResponse>(
+    `/api/sync/projects/${encodeURIComponent(projectId)}${query}`,
+    { method: 'DELETE' },
+  );
+}
+
+export async function restoreProject(projectId: string): Promise<ProjectResponse> {
+  return request<ProjectResponse>(
+    `/api/sync/projects/${encodeURIComponent(projectId)}/undelete`,
+    { method: 'POST' },
+  );
+}
+
+export async function getProjects_includeDeleted(): Promise<ProjectListResponse> {
+  return request<ProjectListResponse>('/api/sync/projects?includeDeleted=true');
 }
 
 // Sync operations
@@ -217,4 +242,82 @@ export async function getHistory(projectId?: string, limit?: number): Promise<Hi
 
   const query = params.toString();
   return request<HistoryResponse>(`/api/sync/history${query ? `?${query}` : ''}`);
+}
+
+// Previews (dry-run)
+
+export async function getPreviews(): Promise<PreviewListResponse> {
+  return request<PreviewListResponse>('/api/sync/previews');
+}
+
+export async function getPreview(projectId: string): Promise<PreviewResponse> {
+  return request<PreviewResponse>(`/api/sync/previews/${encodeURIComponent(projectId)}`);
+}
+
+export async function approvePreview(projectId: string): Promise<OperationResponse> {
+  return request<OperationResponse>(
+    `/api/sync/previews/${encodeURIComponent(projectId)}/approve`,
+    { method: 'POST' },
+  );
+}
+
+export async function rejectPreview(projectId: string): Promise<OperationResponse> {
+  return request<OperationResponse>(
+    `/api/sync/previews/${encodeURIComponent(projectId)}/reject`,
+    { method: 'POST' },
+  );
+}
+
+// Trash
+
+export async function getTrash(projectId: string): Promise<TrashResponse> {
+  return request<TrashResponse>(
+    `/api/sync/projects/${encodeURIComponent(projectId)}/trash`,
+  );
+}
+
+export async function restoreTrash(
+  projectId: string,
+  timestamp?: string,
+): Promise<OperationResponse> {
+  return request<OperationResponse>(
+    `/api/sync/projects/${encodeURIComponent(projectId)}/restore-trash`,
+    {
+      method: 'POST',
+      body: timestamp ? JSON.stringify({ timestamp }) : undefined,
+    },
+  );
+}
+
+export async function purgeTrash(
+  projectId: string,
+  olderThanDays?: number,
+): Promise<OperationResponse> {
+  return request<OperationResponse>(
+    `/api/sync/projects/${encodeURIComponent(projectId)}/purge-trash`,
+    {
+      method: 'POST',
+      body: olderThanDays !== undefined ? JSON.stringify({ olderThanDays }) : undefined,
+    },
+  );
+}
+
+// Approvals (agent path mappings)
+
+export async function getApprovals(): Promise<ApprovedPathsResponse> {
+  return request<ApprovedPathsResponse>('/api/sync/approvals');
+}
+
+export async function addApproval(input: ApprovePathInput): Promise<OperationResponse> {
+  return request<OperationResponse>('/api/sync/approvals', {
+    method: 'POST',
+    body: JSON.stringify(input),
+  });
+}
+
+export async function revokeApproval(projectId: string): Promise<OperationResponse> {
+  return request<OperationResponse>(
+    `/api/sync/approvals/${encodeURIComponent(projectId)}`,
+    { method: 'DELETE' },
+  );
 }

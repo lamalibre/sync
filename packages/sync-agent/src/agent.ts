@@ -191,6 +191,7 @@ export class Agent {
         apiKey: this.settings.apiKey,
         logger: this.logger,
         httpsAgent,
+        agentToken: this.settings.agentToken,
       });
 
       // Set up ticket session manager for panel-mediated authorization.
@@ -228,6 +229,7 @@ export class Agent {
         serverUrl: this.settings.serverUrl,
         apiKey: this.settings.apiKey,
         logger: this.logger,
+        agentToken: this.settings.agentToken,
       });
     }
 
@@ -1167,6 +1169,10 @@ export class Agent {
         };
         await writeAgentSettings(this.agentDir, updatedSettings);
         this.settings = updatedSettings;
+        // Update the server client's token so subsequent requests include it
+        if (newToken && this.serverClient) {
+          this.serverClient.setAgentToken(newToken);
+        }
         this.logger.info({ agentId: this.agentId }, 'Agent ID and token persisted to settings');
       }
     } catch (error: unknown) {

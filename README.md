@@ -49,6 +49,7 @@ sync/
 │   ├── sync-agent/         @lamalibre/sync-agent — Agent daemon
 │   ├── sync-cli/           @lamalibre/sync-cli — CLI tool
 │   ├── sync-shared/        @lamalibre/sync-shared — Shared utilities
+│   ├── sync-desktop/       @lamalibre/sync-desktop — Tauri v2 + Svelte 5 desktop UI
 │   └── create-sync/        @lamalibre/create-sync — npx installer
 ├── tests/
 │   └── e2e/               Two-VM E2E tests
@@ -112,12 +113,17 @@ Full documentation is available at **[lamalibre.github.io/sync](https://lamalibr
 
 ## Security Highlights
 
-- **Credentials encrypted at rest** — AES-256-GCM with random master key and scrypt key derivation
+- **Credentials encrypted at rest** — AES-256-GCM with random master key and scrypt key derivation (server and agent)
+- **Agent token verification** — per-agent SHA-256 hashed tokens on all mutation endpoints (heartbeat, project assignments, removal, reporting)
+- **Setup token** — one-time token for initial API key generation, constant-time comparison
 - **Client-side encryption** — optional per-project via rclone crypt (NaCl SecretBox + EME filenames)
 - **No credentials in CLI args** — rclone reads from config file (mode 0600), never process arguments
 - **Path validation** — no null bytes, no `..` traversal, max 4096 characters
+- **Local paths never cross the network** — stored in agent's `approved-paths.json`, stripped from API responses
+- **Error message sanitization** — URL credentials, file paths, and credential key=value pairs redacted from rclone errors
 - **Atomic file writes** — temp → fsync → rename for all state files
 - **API key hashing** — SHA-256 with constant-time comparison
+- **Capacity limits** — MAX_AGENTS=50, MAX_PROJECTS=100
 
 ## Development
 

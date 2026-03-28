@@ -29,12 +29,19 @@ Authorization: Bearer <api-key>
 
 The API key is generated during installation via `POST /api/sync/setup/api-key` using a one-time setup token. The raw key is shown once and stored as a SHA-256 hash on the server.
 
-**Agent Token (heartbeat):**
+**Agent Token (agent mutation endpoints):**
 ```
 X-Agent-Token: <agent-token>
 ```
 
-Agents receive a unique token upon registration (`POST /api/sync/agents`). The heartbeat endpoint (`POST /api/sync/agents/:id/heartbeat`) authenticates using this per-agent token via the `X-Agent-Token` header instead of the primary API key. The raw token is returned only once during registration; the server stores its SHA-256 hash.
+Agents receive a unique token upon registration (`POST /api/sync/agents`). All agent mutation endpoints require this per-agent token via the `X-Agent-Token` header in addition to the primary API key:
+
+- `POST /api/sync/agents/:id/heartbeat` — heartbeat
+- `PATCH /api/sync/agents/:id/projects` — project assignment updates
+- `DELETE /api/sync/agents/:id` — agent removal
+- `POST /api/sync/agent-report` — operation result reporting
+
+The raw token is returned only once during registration; the server stores its SHA-256 hash. Verification uses constant-time comparison to prevent timing attacks.
 
 **Development mode** (`SYNC_SKIP_AUTH=1`): Authentication is bypassed for requests from loopback addresses only (`127.0.0.1`, `localhost`, `::1`). The server refuses to start if `SYNC_SKIP_AUTH=1` is combined with a non-loopback `SYNC_HOST` (e.g., `0.0.0.0`). A loud warning is logged on startup. This is NOT based on `NODE_ENV`.
 
@@ -88,7 +95,7 @@ Input validated with Zod schemas at the route level:
 | 401 | Auth missing | No Authorization header or API key |
 | 403 | Forbidden | Invalid API key or agent token |
 | 404 | Not found | Project or agent does not exist |
-| 409 | Conflict | Sync already in progress |
+| 409 | Conflict | Sync already in progress, max agents (50) reached, max projects (100) reached |
 | 502 | Bad gateway | Storage test failed (provider unreachable) |
 
 ## Endpoint Summary
@@ -96,37 +103,44 @@ Input validated with Zod schemas at the route level:
 | Method | Path | Auth | Description |
 | --- | --- | --- | --- |
 | GET | `/api/sync/health` | None | Health check — returns `{ ok, uptime, timestamp }` |
-| POST | `/api/sync/setup/api-key` | Setup token | Generate API key |
+| POST | `/api/sync/setup/api-key` | Setup token (first time) or Bearer (regeneration) | Generate API key |
 | GET | `/api/sync/storage` | Admin | Get storage config (redacted) |
 | PATCH | `/api/sync/storage` | Admin | Update storage config |
 | POST | `/api/sync/storage/test` | Admin | Test storage connectivity |
 | POST | `/api/sync/storage/create-bucket` | Admin | Create cloud bucket |
 | GET | `/api/sync/projects` | Admin/Agent | List projects |
-| GET | `/api/sync/projects/:id` | Admin | Get project |
+| GET | `/api/sync/projects/:projectId` | Admin | Get project |
 | POST | `/api/sync/projects` | Admin | Create project |
-| PATCH | `/api/sync/projects/:id` | Admin | Update project |
-| DELETE | `/api/sync/projects/:id` | Admin | Delete project (soft or hard) |
-| POST | `/api/sync/projects/:id/undelete` | Admin | Restore soft-deleted project |
-| POST | `/api/sync/projects/:id/sync` | Admin | Trigger sync |
-| POST | `/api/sync/projects/:id/archive` | Admin | Start archive |
-| POST | `/api/sync/projects/:id/restore` | Admin | Start restore (optional `filePath` for single-file restore) |
-| GET | `/api/sync/projects/:id/status` | Admin/Agent | Project status |
-| GET | `/api/sync/projects/:id/stubs` | Admin | Archive stub info |
-| GET | `/api/sync/projects/:id/savings` | Admin | Archive savings |
+| PATCH | `/api/sync/projects/:projectId` | Admin | Update project |
+| DELETE | `/api/sync/projects/:projectId` | Admin | Delete project (soft or hard) |
+| POST | `/api/sync/projects/:projectId/undelete` | Admin | Restore soft-deleted project |
+| POST | `/api/sync/projects/:projectId/sync` | Admin | Trigger sync |
+| POST | `/api/sync/projects/:projectId/archive` | Admin | Start archive |
+| POST | `/api/sync/projects/:projectId/restore` | Admin | Start restore (optional `filePath` for single-file restore) |
+| GET | `/api/sync/projects/:projectId/status` | Admin/Agent | Project status |
+| GET | `/api/sync/projects/:projectId/stubs` | Admin | Archive stub info |
+| GET | `/api/sync/projects/:projectId/savings` | Admin | Archive savings |
 | GET | `/api/sync/status` | Admin | Global sync status |
 | GET | `/api/sync/history` | Admin | Sync operation log |
 | GET | `/api/sync/savings` | Admin | Global archive savings |
-| GET | `/api/sync/projects/:id/trash` | Admin | List trash entries |
-| POST | `/api/sync/projects/:id/purge-trash` | Admin | Purge expired trash |
-| POST | `/api/sync/projects/:id/restore-trash` | Admin | Restore files from trash |
+| GET | `/api/sync/projects/:projectId/trash` | Admin | List trash entries |
+| POST | `/api/sync/projects/:projectId/purge-trash` | Admin | Purge expired trash |
+| POST | `/api/sync/projects/:projectId/restore-trash` | Admin | Restore files from trash |
 | GET | `/api/sync/agents` | Admin | List agents |
-| GET | `/api/sync/agents/:id` | Admin | Get agent |
-| POST | `/api/sync/agents` | Admin | Register agent |
-| PATCH | `/api/sync/agents/:id/projects` | Admin | Assign projects |
-| POST | `/api/sync/agents/:id/heartbeat` | Agent | Agent heartbeat |
-| DELETE | `/api/sync/agents/:id` | Admin | Remove agent |
+| GET | `/api/sync/agents/:agentId` | Admin | Get agent |
+| POST | `/api/sync/agents` | Admin | Register agent (returns one-time agent token) |
+| PATCH | `/api/sync/agents/:agentId/projects` | Admin + Agent Token | Assign projects |
+| POST | `/api/sync/agents/:agentId/heartbeat` | Agent Token | Agent heartbeat |
+| DELETE | `/api/sync/agents/:agentId` | Admin + Agent Token | Remove agent |
+| GET | `/api/sync/previews` | Admin | List pending sync previews |
+| GET | `/api/sync/previews/:projectId` | Admin | Get preview detail |
+| POST | `/api/sync/previews/:projectId/approve` | Admin | Approve pending preview |
+| POST | `/api/sync/previews/:projectId/reject` | Admin | Reject pending preview |
+| GET | `/api/sync/approvals` | Admin | List approved path entries |
+| POST | `/api/sync/approvals` | Admin | Create/update path approval |
+| DELETE | `/api/sync/approvals/:projectId` | Admin | Revoke path approval |
 | GET | `/api/sync/agent-config` | Agent | Get config (credentials included) |
-| POST | `/api/sync/agent-report` | Agent | Report operation result |
+| POST | `/api/sync/agent-report` | Agent + Agent Token | Report operation result |
 
 ## Validation Schemas
 

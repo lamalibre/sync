@@ -84,16 +84,21 @@ Resolved patterns are written to `~/.sync-agent/exclude-filters/<projectId>.excl
 
 ## Security
 
-- Storage credentials encrypted at rest on server
+- Storage credentials encrypted at rest on server (AES-256-GCM with scrypt key derivation)
+- API key and agent token encrypted at rest on the agent (AES-256-GCM with agent master key)
+- Agent token verification (SHA-256 hash, constant-time compare) on all agent mutation endpoints (heartbeat, PATCH projects, DELETE agent, agent-report)
+- Setup token required for initial API key generation (X-Setup-Token header, constant-time compare)
 - rclone.conf created with mode 0600
 - Agent directory `~/.sync-agent/` created with mode 0700
 - Credentials travel only through mTLS tunnel (plugin mode) or direct HTTPS (standalone mode)
 - Config bundles encrypted with one-time passphrase
 - Path validation: no null bytes, no `..` after normalization, max 4096 characters
 - rclone passwords passed via `RCLONE_CONFIG_PASS` environment variable, never as CLI arguments
-- Local paths never cross the network — stored in `approved-paths.json` on the agent only, set via `sync agent-approve`
+- Local paths never cross the network — stored in `approved-paths.json` on the agent only, set via `sync agent-approve`; stripped from preview and approval API responses
 - Access modes: agent-local direction overrides allow per-agent sync direction control
 - Sync preview/confirm modes: operations can be previewed before execution
+- URL credential sanitization in error messages (sanitizeRcloneError strips URLs, paths, and credential key=value pairs)
+- Capacity limits: MAX_AGENTS=50, MAX_PROJECTS=100 (409 on registration/creation when full)
 
 ## Environment Variables
 

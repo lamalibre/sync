@@ -51,7 +51,7 @@ Create a new sync project.
 
 **Errors:**
 - `400` — Validation failed (invalid path, bad cron, etc.)
-- `409` — Project with this name already exists
+- `409` — Project with this name already exists, or maximum number of projects (100) reached
 
 ## List Projects
 

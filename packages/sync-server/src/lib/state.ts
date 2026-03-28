@@ -206,6 +206,7 @@ function slugify(name: string): string {
 }
 
 const MAX_PROJECTS = 100;
+const MAX_AGENTS = 50;
 
 export async function createProject(input: ProjectCreate): Promise<Project> {
   const projects = await loadProjects();
@@ -614,7 +615,11 @@ export async function registerAgent(input: AgentRegister): Promise<AgentRegistra
     return { agent: updated, agentToken };
   }
 
-  // New agent registration
+  // New agent registration — check capacity
+  if (agents.length >= MAX_AGENTS) {
+    throw new ConflictError(`Maximum number of agents (${MAX_AGENTS}) reached`);
+  }
+
   const agent: RegisteredAgent = {
     id: randomUUID(),
     name: input.name,

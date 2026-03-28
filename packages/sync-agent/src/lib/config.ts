@@ -165,8 +165,25 @@ export async function ensureAgentDir(agentDir: string): Promise<void> {
 }
 
 /**
+ * Detect whether a string looks like an encrypted value (base64-encoded
+ * with enough length to contain salt + iv + authTag + ciphertext).
+ * Plaintext API keys are typically hex or alphanumeric and shorter.
+ */
+function looksEncrypted(value: string): boolean {
+  // Encrypted values are base64-encoded and at least salt(32) + iv(16) + authTag(16) = 64 bytes
+  // which is ~88 base64 characters. Plaintext API keys are much shorter.
+  if (value.length < 80) return false;
+  // Must be valid base64
+  return /^[A-Za-z0-9+/]+=*$/.test(value);
+}
+
+/**
  * Read agent settings from disk.
  * Falls back to environment variables if the file does not exist.
+ *
+ * The apiKey and agentToken fields are encrypted at rest. On read, they
+ * are transparently decrypted. For backward compatibility, plaintext
+ * values are detected and returned as-is.
  */
 export async function readAgentSettings(agentDir: string, logger: Logger): Promise<AgentSettings> {
   const settingsPath = join(agentDir, SETTINGS_FILE);
@@ -175,7 +192,32 @@ export async function readAgentSettings(agentDir: string, logger: Logger): Promi
     const raw = await readFile(settingsPath, 'utf-8');
     const parsed: unknown = JSON.parse(raw);
     if (isAgentSettings(parsed)) {
-      return parsed;
+      // Decrypt apiKey if it was encrypted at rest
+      let apiKey = parsed.apiKey;
+      if (apiKey && looksEncrypted(apiKey)) {
+        try {
+          apiKey = await decryptJson<string>(apiKey);
+        } catch {
+          // If decryption fails, assume it's a plaintext key (backward compat)
+          logger.debug('apiKey decryption failed, treating as plaintext (migration)');
+        }
+      }
+
+      // Decrypt agentToken if it was encrypted at rest
+      let agentToken = parsed.agentToken;
+      if (agentToken && looksEncrypted(agentToken)) {
+        try {
+          agentToken = await decryptJson<string>(agentToken);
+        } catch {
+          logger.debug('agentToken decryption failed, treating as plaintext (migration)');
+        }
+      }
+
+      return {
+        ...parsed,
+        apiKey,
+        ...(agentToken !== undefined ? { agentToken } : {}),
+      };
     }
     logger.warn('Agent settings file has invalid format, falling back to env vars');
   } catch (error: unknown) {
@@ -203,10 +245,23 @@ export async function readAgentSettings(agentDir: string, logger: Logger): Promi
 
 /**
  * Write agent settings to disk atomically.
+ * The apiKey and agentToken fields are encrypted at rest using the agent's master key.
  */
 export async function writeAgentSettings(agentDir: string, settings: AgentSettings): Promise<void> {
+  // Encrypt sensitive fields before persisting
+  const encryptedApiKey = settings.apiKey ? await encryptJson(settings.apiKey) : settings.apiKey;
+  const encryptedAgentToken = settings.agentToken
+    ? await encryptJson(settings.agentToken)
+    : settings.agentToken;
+
+  const persisted = {
+    ...settings,
+    apiKey: encryptedApiKey,
+    ...(encryptedAgentToken !== undefined ? { agentToken: encryptedAgentToken } : {}),
+  };
+
   const settingsPath = join(agentDir, SETTINGS_FILE);
-  await atomicWriteFile(settingsPath, JSON.stringify(settings, null, 2) + '\n', 0o600);
+  await atomicWriteFile(settingsPath, JSON.stringify(persisted, null, 2) + '\n', 0o600);
 }
 
 /**

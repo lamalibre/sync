@@ -4,7 +4,9 @@
 
 | Term | Definition |
 | --- | --- |
+| **Access mode** | Controls what sync direction an agent is allowed to execute for a project: `full` (all directions), `push-only`, `pull-only`, or `protected` (no sync). Set via `sync agent-approve --access-mode`. |
 | **Agent** | A daemon (`sync-agent`) running on the machine with files to sync. Polls the server for config, executes rclone operations, watches files, and reports results. |
+| **Agent token** | A per-agent authentication token generated on registration, returned once, stored as SHA-256 hash on the server. Required via `X-Agent-Token` header on all agent mutation endpoints. Encrypted at rest on the agent. |
 | **Archive** | Moving files from local disk to cloud storage via `rclone move`, replacing them with a metadata stub. Frees local disk space while keeping files retrievable. |
 | **Atomic write** | File write pattern (temp → fsync → rename) that prevents partial reads. Used for all JSON state files. |
 | **Bandwidth limit** | A per-project limit on rclone transfer speed. Format: `10M` (10 MB/s), `500k` (500 KB/s), or time-based (`08:00,10M 18:00,50M`). Passed as `--bwlimit`. |
@@ -12,6 +14,7 @@
 | **Bisync baseline** | The initial state established by `rclone bisync --resync` on first run. Subsequent runs compare against this baseline to detect changes. |
 | **chokidar** | Node.js file watching library used to detect local file changes. Uses native OS events (FSEvents on macOS, inotify on Linux). |
 | **Config bundle** | An encrypted package from Portlama containing server URL, credentials, and project definitions. Used for agent enrollment in plugin mode. |
+| **Confirm mode** | Controls whether sync operations require preview approval: `auto` (execute immediately), `confirm-destructive` (require approval when deletes exceed threshold), `confirm-always` (require approval for all syncs). Set via `sync agent-approve --confirm-mode`. |
 | **Conflict** | When the same file changes on both local and cloud between syncs. Detected by `rclone bisync`. Resolved by the project's conflict strategy. |
 | **Conflict strategy** | How to resolve bidirectional sync conflicts: `newest-wins` (most recent mtime), `local-wins`, `remote-wins`, or `manual` (keep both in-place with numeric suffixes). |
 | **Cron expression** | A 5-field time specification for scheduled syncs: minute hour day month weekday. Example: `0 */6 * * *` = every 6 hours. |
@@ -29,6 +32,7 @@
 | **Provider** | A cloud storage service (Spaces, S3, GCS, Azure, B2, custom S3-compatible, local). Configured once on the server. |
 | **Push sync** | One-way sync where local is the source of truth. Cloud mirrors local; cloud-only files are deleted. |
 | **Pull sync** | One-way sync where cloud is the source of truth. Local mirrors cloud; local-only files are deleted. |
+| **Path approval** | A mapping in `approved-paths.json` that authorizes the agent to sync a specific project to a local directory, with access mode and confirm mode settings. Set via `sync agent-approve`. |
 | **rclone** | External binary for syncing files with 40+ cloud providers. Sync's sole file transfer engine. |
 | **rclone crypt** | rclone's client-side encryption using NaCl SecretBox (XSalsa20 + Poly1305) for content and EME for filenames. |
 | **Restore** | Downloading archived files from cloud storage via `rclone copy` and removing the metadata stub. The cloud copy is preserved. |
@@ -38,6 +42,8 @@
 | **Stub** | A small JSON file (`.sync-stub.json`) left in a local directory after archiving. Contains metadata about the archived files (count, size, cloud location). |
 | **Sync trash** | Backup directory (`.sync-trash/`) where files overwritten or deleted during sync are kept. Uses rclone's `--backup-dir` flag. Organized by project and timestamp. Automatically cleaned up based on retention policy (default 90 days). |
 | **Trash restore** | Copying files from a timestamped trash directory back to the project's local path. Initiated via `POST /api/sync/projects/:id/restore-trash` or the `trash-restore` CLI command. |
+| **Setup token** | A one-time token generated on server first start, logged to console. Required via `X-Setup-Token` header for initial API key generation (`POST /api/sync/setup/api-key`). Verified with constant-time comparison. |
+| **Sync preview** | A dry-run output (`rclone --dry-run`) showing planned changes before execution. Created when a project uses `confirm-destructive` or `confirm-always` confirm mode. Reviewed and approved/rejected via CLI (`sync preview`) or API (`/api/sync/previews`). |
 | **Sync trigger** | What initiates a sync operation: `manual` (API/CLI), `watch` (file changes), `schedule` (cron), or `watch+schedule` (both). |
 
 ## Related Documentation

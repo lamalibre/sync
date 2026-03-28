@@ -31,8 +31,8 @@ The installer runs interactively and performs:
 2. **rclone check** — verifies rclone is installed (shows install instructions if not)
 3. **Directory creation** — creates `~/.sync/` with mode `0700`
 4. **Master key generation** — creates random 32-byte encryption key
-5. **Server startup** — starts the server temporarily on port 9393
-6. **API key generation** — creates a Bearer token (printed once — save it)
+5. **Server startup** — starts the server temporarily on port 9393 (logs a one-time setup token)
+6. **API key generation** — prompts for the setup token, then generates a Bearer token (printed once — save it)
 7. **Storage setup** — walks you through provider configuration (Spaces, S3, GCS, etc.)
 8. **Connection test** — verifies the storage bucket is accessible
 9. **First project** — optionally creates your first sync project

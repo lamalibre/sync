@@ -10,7 +10,7 @@
 | `projects.json` | `0600` | Project definitions: paths, direction, schedule, excludes, encryption |
 | `sync-history.json` | `0600` | Sync operation log (last 100 per project) |
 | `archive-savings.json` | `0600` | Per-project archive disk savings |
-| `agents.json` | `0600` | Agent registry: IDs, heartbeats, project assignments, disk usage |
+| `agents.json` | `0600` | Agent registry: IDs, heartbeats, project assignments, disk usage, agent token hashes |
 | `master.key` | `0600` | Encryption master key (32-byte hex, generated once) |
 
 Directory mode: `0700`
@@ -19,7 +19,7 @@ Directory mode: `0700`
 
 | File | Mode | Purpose |
 | --- | --- | --- |
-| `agent-settings.json` | `0600` | Config: server URL, API key, agent ID, poll interval |
+| `agent-settings.json` | `0600` | Config: server URL, API key (encrypted), agent ID, agent token (encrypted), poll interval |
 | `cached-config.json` | `0600` | Encrypted cache of server config (offline fallback) |
 | `rclone.conf` | `0600` | Generated rclone config (provider credentials, crypt overlays) |
 | `master.key` | `0600` | Agent encryption key (32-byte hex, generated once) |

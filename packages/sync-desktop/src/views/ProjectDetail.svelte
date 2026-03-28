@@ -7,6 +7,7 @@
     triggerArchive,
     triggerRestore,
     deleteProject,
+    restoreProject,
   } from "../lib/api.js";
   import type {
     Project,
@@ -45,6 +46,7 @@
   let actionInProgress = $state(false);
   let showEditModal = $state(false);
   let showDeleteConfirm = $state(false);
+  let showPermanentDeleteConfirm = $state(false);
 
   async function refresh(): Promise<void> {
     loading = true;
@@ -108,10 +110,39 @@
     actionInProgress = true;
     actionError = null;
     try {
-      await deleteProject(projectId);
+      await deleteProject(projectId, false);
       onNavigateBack();
     } catch (err: unknown) {
       actionError = err instanceof Error ? err.message : "Delete failed";
+    } finally {
+      actionInProgress = false;
+    }
+  }
+
+  async function handlePermanentDelete(): Promise<void> {
+    actionInProgress = true;
+    actionError = null;
+    try {
+      await deleteProject(projectId, true);
+      onNavigateBack();
+    } catch (err: unknown) {
+      actionError =
+        err instanceof Error ? err.message : "Permanent delete failed";
+    } finally {
+      actionInProgress = false;
+    }
+  }
+
+  async function handleRestoreProject(): Promise<void> {
+    actionInProgress = true;
+    actionError = null;
+    try {
+      const res = await restoreProject(projectId);
+      project = res.project;
+      showDeleteConfirm = false;
+      await refresh();
+    } catch (err: unknown) {
+      actionError = err instanceof Error ? err.message : "Restore failed";
     } finally {
       actionInProgress = false;
     }
@@ -131,9 +162,9 @@
   $effect(() => {
     // Re-run when projectId changes
     void projectId;
-    refresh();
+    void refresh();
     const interval = setInterval(
-      () => { refresh(); },
+      () => { void refresh(); },
       hasActiveOp ? 5_000 : 30_000,
     );
     return () => clearInterval(interval);
@@ -195,6 +226,39 @@
     <p class="text-sm text-error">{error}</p>
   </div>
 {:else if project}
+  <!-- Deleted banner -->
+  {#if project.deletedAt}
+    <div
+      class="mb-4 flex items-center justify-between rounded-lg border border-warning/30 bg-warning/10 px-4 py-3"
+    >
+      <div class="flex items-center gap-3">
+        <AlertCircle class="h-5 w-5 shrink-0 text-warning" />
+        <div>
+          <p class="text-sm font-medium text-warning">Project Deleted</p>
+          <p class="text-xs text-warning/70">
+            This project was soft-deleted. You can restore it or permanently remove it.
+          </p>
+        </div>
+      </div>
+      <div class="flex items-center gap-2">
+        <button
+          class="flex items-center gap-2 rounded-md bg-success px-3 py-1.5 text-sm font-medium text-surface transition-colors hover:bg-success/80 disabled:opacity-50"
+          onclick={handleRestoreProject}
+          disabled={actionInProgress}
+        >
+          Restore
+        </button>
+        <button
+          class="flex items-center gap-2 rounded-md bg-error px-3 py-1.5 text-sm font-medium text-white transition-colors hover:bg-error/80 disabled:opacity-50"
+          onclick={() => (showPermanentDeleteConfirm = true)}
+          disabled={actionInProgress}
+        >
+          Delete Permanently
+        </button>
+      </div>
+    </div>
+  {/if}
+
   <!-- Header -->
   <div class="mb-6 flex items-start justify-between">
     <div>
@@ -202,20 +266,22 @@
       <p class="mt-1 text-xs text-text-secondary">{project.remotePath}</p>
     </div>
     <div class="flex items-center gap-2">
-      <button
-        class="flex items-center gap-2 rounded-md border border-border bg-card px-3 py-1.5 text-sm text-text-secondary transition-colors hover:bg-card-hover hover:text-accent"
-        onclick={() => (showEditModal = true)}
-      >
-        <Pencil class="h-3.5 w-3.5" />
-        Edit
-      </button>
-      <button
-        class="flex items-center gap-2 rounded-md border border-border bg-card px-3 py-1.5 text-sm text-text-secondary transition-colors hover:bg-card-hover hover:text-error"
-        onclick={() => (showDeleteConfirm = true)}
-      >
-        <Trash2 class="h-3.5 w-3.5" />
-        Delete
-      </button>
+      {#if !project.deletedAt}
+        <button
+          class="flex items-center gap-2 rounded-md border border-border bg-card px-3 py-1.5 text-sm text-text-secondary transition-colors hover:bg-card-hover hover:text-accent"
+          onclick={() => (showEditModal = true)}
+        >
+          <Pencil class="h-3.5 w-3.5" />
+          Edit
+        </button>
+        <button
+          class="flex items-center gap-2 rounded-md border border-border bg-card px-3 py-1.5 text-sm text-text-secondary transition-colors hover:bg-card-hover hover:text-error"
+          onclick={() => (showDeleteConfirm = true)}
+        >
+          <Trash2 class="h-3.5 w-3.5" />
+          Delete
+        </button>
+      {/if}
       <button
         class="flex items-center gap-2 rounded-md bg-card px-3 py-1.5 text-sm text-text-secondary transition-colors hover:bg-card-hover hover:text-accent"
         onclick={refresh}
@@ -389,9 +455,19 @@
 {#if showDeleteConfirm && project}
   <ConfirmModal
     title="Delete Project"
-    message="Are you sure you want to delete '{project.name}'? This will remove the project configuration but will not delete any files."
+    message="Are you sure you want to delete '{project.name}'? The project will be soft-deleted and can be restored later."
     confirmLabel="Delete Project"
     onconfirm={handleDelete}
     oncancel={() => (showDeleteConfirm = false)}
+  />
+{/if}
+
+{#if showPermanentDeleteConfirm && project}
+  <ConfirmModal
+    title="Permanently Delete Project"
+    message="This cannot be undone. All project data for '{project.name}' will be permanently removed. This includes all configuration and history."
+    confirmLabel="Delete Permanently"
+    onconfirm={handlePermanentDelete}
+    oncancel={() => (showPermanentDeleteConfirm = false)}
   />
 {/if}

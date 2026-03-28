@@ -49,32 +49,40 @@ The server runs in two modes from the same codebase:
 | POST | `/api/sync/storage/test` | Test storage connectivity |
 | POST | `/api/sync/storage/create-bucket` | Create cloud bucket |
 | GET | `/api/sync/projects` | List all projects |
-| GET | `/api/sync/projects/:id` | Get single project |
+| GET | `/api/sync/projects/:projectId` | Get single project |
 | POST | `/api/sync/projects` | Create project |
-| PATCH | `/api/sync/projects/:id` | Update project |
-| DELETE | `/api/sync/projects/:id` | Delete project |
-| POST | `/api/sync/projects/:id/sync` | Trigger manual sync |
-| POST | `/api/sync/projects/:id/archive` | Start archive operation |
-| POST | `/api/sync/projects/:id/restore` | Start restore operation |
-| GET | `/api/sync/projects/:id/status` | Get project status + active operation |
-| GET | `/api/sync/projects/:id/stubs` | Get archive stub info |
-| GET | `/api/sync/projects/:id/savings` | Get archive savings for project |
+| PATCH | `/api/sync/projects/:projectId` | Update project |
+| DELETE | `/api/sync/projects/:projectId` | Delete project |
+| POST | `/api/sync/projects/:projectId/undelete` | Restore soft-deleted project |
+| POST | `/api/sync/projects/:projectId/sync` | Trigger manual sync |
+| POST | `/api/sync/projects/:projectId/archive` | Start archive operation |
+| POST | `/api/sync/projects/:projectId/restore` | Start restore operation |
+| GET | `/api/sync/projects/:projectId/status` | Get project status + active operation |
+| GET | `/api/sync/projects/:projectId/stubs` | Get archive stub info |
+| GET | `/api/sync/projects/:projectId/savings` | Get archive savings for project |
 | GET | `/api/sync/status` | Global sync status |
 | GET | `/api/sync/history` | Sync operation history |
 | GET | `/api/sync/savings` | Global archive savings |
 | GET | `/api/sync/agents` | List agents |
-| GET | `/api/sync/agents/:id` | Get single agent |
-| PATCH | `/api/sync/agents/:id/projects` | Assign projects to agent |
-| DELETE | `/api/sync/agents/:id` | Remove agent |
+| GET | `/api/sync/agents/:agentId` | Get single agent |
+| GET | `/api/sync/previews` | List pending sync previews |
+| GET | `/api/sync/previews/:projectId` | Get preview detail |
+| POST | `/api/sync/previews/:projectId/approve` | Approve pending preview |
+| POST | `/api/sync/previews/:projectId/reject` | Reject pending preview |
+| GET | `/api/sync/approvals` | List approved path entries |
+| POST | `/api/sync/approvals` | Create/update path approval |
+| DELETE | `/api/sync/approvals/:projectId` | Revoke path approval |
 
 ### Agent Routes
 
 | Method | Path | Auth | Purpose |
 | --- | --- | --- | --- |
 | GET | `/api/sync/agent-config` | Agent (sync:read) | Get projects + storage config (credentials included) |
-| POST | `/api/sync/agent-report` | Agent (sync:write) | Report sync/archive/restore result |
-| POST | `/api/sync/agents` | Agent | Register new agent |
-| POST | `/api/sync/agents/:id/heartbeat` | Agent | Send heartbeat with disk usage |
+| POST | `/api/sync/agent-report` | Agent (sync:write) + Agent Token | Report sync/archive/restore result |
+| POST | `/api/sync/agents` | Agent | Register new agent (returns one-time agent token) |
+| POST | `/api/sync/agents/:agentId/heartbeat` | Agent Token | Send heartbeat with disk usage |
+| PATCH | `/api/sync/agents/:agentId/projects` | Admin + Agent Token | Update project assignments |
+| DELETE | `/api/sync/agents/:agentId` | Admin + Agent Token | Remove agent |
 
 ## Library Modules
 
@@ -82,8 +90,9 @@ The server runs in two modes from the same codebase:
 
 Unified state management (the largest server module):
 - Load/save all JSON state files (projects, history, savings, agents, config)
-- Project CRUD and sync operations
-- Agent registry (register, heartbeat, online/offline status)
+- Project CRUD and sync operations (MAX_PROJECTS = 100)
+- Agent registry (register, heartbeat, online/offline status, MAX_AGENTS = 50)
+- Agent token generation (SHA-256 hash), verification (constant-time), and re-registration
 - Storage credential encrypt/decrypt/redact
 - Active operations map (in-memory)
 - Sync history and archive savings tracking
@@ -100,8 +109,18 @@ Encryption utilities:
 
 Authentication hook:
 - API key verification (SHA-256 hash comparison, constant-time)
-- Agent token verification
+- Agent token verification (SHA-256 hash comparison, constant-time)
 - `SYNC_SKIP_AUTH=1` bypass (loopback only)
+
+### Agent Token Verification
+
+Agent mutation endpoints verify the `X-Agent-Token` header at the route level:
+- Heartbeat (`POST /agents/:id/heartbeat`)
+- Project assignment (`PATCH /agents/:id/projects`)
+- Agent removal (`DELETE /agents/:id`)
+- Operation reporting (`POST /agent-report`)
+
+The token is verified by hashing with SHA-256 and comparing against the stored hash using `timingSafeEqual`. If any registered agent has a stored token hash, the server requires a valid token from all agents on these endpoints.
 
 ### `lib/schemas.ts`
 
@@ -143,7 +162,9 @@ Active operations are not persisted — they exist only while the server process
 | `src/lib/state.ts` | State file management (load/save JSON) |
 | `src/lib/crypto.ts` | AES-256-GCM encrypt/decrypt utilities |
 | `src/lib/schemas.ts` | Zod validation schemas |
-| `src/routes/` | Route handlers: health, setup, storage, projects, sync, archive, status, agent, agents |
+| `src/routes/approvals.ts` | Path approval management routes |
+| `src/routes/previews.ts` | Sync preview (dry-run) management routes |
+| `src/routes/` | Route handlers: health, setup, storage, projects, sync, archive, status, agent, agents, approvals, previews |
 
 ## Related Documentation
 

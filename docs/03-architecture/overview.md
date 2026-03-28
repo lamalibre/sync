@@ -30,6 +30,8 @@ These three pieces interact through a polling loop: the agent checks the server 
        │                │  │  ├─ /api/sync/status      (global)        │  │
        │                │  │  ├─ /api/sync/history     (operation log) │  │
        │                │  │  ├─ /api/sync/savings     (archive stats) │  │
+       │                │  │  ├─ /api/sync/previews    (dry-run mgmt)  │  │
+       │                │  │  ├─ /api/sync/approvals   (path approvals)│  │
        │                │  │  ├─ /api/sync/agent-config (agent pulls)  │  │
        │                │  │  └─ /api/sync/agent-report (agent posts)  │  │
        │                │  └────────────────────────────────────────────┘  │
@@ -59,7 +61,8 @@ These three pieces interact through a polling loop: the agent checks the server 
        │                │  └── Heartbeat every 15s (disk usage)            │
        │                │                                                  │
        │                │  State: ~/.sync-agent/                           │
-       │                │  ├─ agent-settings.json  (server URL, API key)   │
+       │                │  ├─ agent-settings.json  (server URL, API key,   │
+       │                │  │                        agent token — encrypted)│
        │                │  ├─ cached-config.json   (encrypted cache)       │
        │                │  ├─ rclone.conf          (generated, 0600)       │
        │                │  ├─ master.key           (local encryption key)  │
@@ -79,6 +82,12 @@ These three pieces interact through a polling loop: the agent checks the server 
 │  ├── archive [project]           │
 │  ├── restore [project]           │
 │  ├── projects                    │
+│  ├── project-create              │
+│  ├── project-edit [project]      │
+│  ├── agents                      │
+│  ├── storage [subcommand]        │
+│  ├── history [project]           │
+│  ├── health                      │
 │  ├── config                      │
 │  └── uninstall                   │
 │                                  │
@@ -105,7 +114,8 @@ sync/
 │   │   └── src/
 │   │       ├── index.ts          ← Standalone server entry
 │   │       ├── server.ts         ← Fastify app factory, error handling
-│   │       ├── routes/           ← REST endpoints (health, setup, storage, projects, sync, archive, status, agent, agents)
+│   │       ├── routes/           ← REST endpoints (health, setup, storage, projects, sync,
+│   │       │                        archive, status, agent, agents, approvals, previews, trash)
 │   │       └── lib/              ← Business logic (plugin, auth, state, crypto, schemas)
 │   │
 │   ├── sync-agent/               ← Agent daemon
@@ -132,8 +142,10 @@ sync/
 │   │   └── src/
 │   │       ├── index.ts          ← Entry point and command dispatch
 │   │       └── commands/         ← status, trigger, archive, restore, config, projects,
-│   │                                project-delete, project-restore, trash-list,
-│   │                                trash-restore, trash-purge, agent-approve, preview, uninstall
+│   │                                project-create, project-edit, project-delete,
+│   │                                project-restore, agents, storage, history, health,
+│   │                                trash-list, trash-restore, trash-purge,
+│   │                                agent-approve, preview, uninstall
 │   │
 │   ├── sync-shared/              ← Shared utilities
 │   │   └── src/
@@ -236,7 +248,7 @@ At this scale (a handful of projects, a few agents), a database adds a process d
 | `~/.sync/archive-savings.json` | Archive disk savings tracker |
 | `~/.sync/agents.json` | Agent registry (IDs, heartbeats, project assignments) |
 | `~/.sync/master.key` | Encryption master key (32-byte hex) |
-| `~/.sync-agent/agent-settings.json` | Agent config (server URL, API key) |
+| `~/.sync-agent/agent-settings.json` | Agent config (server URL, API key, agent token — encrypted at rest) |
 | `~/.sync-agent/rclone.conf` | Generated rclone config (credentials, mode 0600) |
 | `~/.sync-agent/cached-config.json` | Encrypted config cache (offline resilience) |
 | `~/.sync-agent/approved-paths.json` | Project-to-local-path mapping with access/confirm modes |

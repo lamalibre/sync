@@ -10,6 +10,8 @@ import { agentRoutes } from './routes/agent.js';
 import { agentRegistryRoutes } from './routes/agents.js';
 import { archiveRoutes } from './routes/archive.js';
 import { trashRoutes } from './routes/trash.js';
+import { previewRoutes } from './routes/previews.js';
+import { approvalRoutes } from './routes/approvals.js';
 import { setupRoutes } from './routes/setup.js';
 import { registerAuthHook } from './lib/auth.js';
 import { purgeExpiredProjects, loadConfig } from './lib/state.js';
@@ -74,6 +76,8 @@ export async function buildServer(opts: BuildServerOptions = {}) {
   await app.register(agentRegistryRoutes);
   await app.register(archiveRoutes);
   await app.register(trashRoutes);
+  await app.register(previewRoutes);
+  await app.register(approvalRoutes);
   await app.register(setupRoutes);
 
   // Periodically purge soft-deleted projects past retention (every 6 hours)

@@ -8,6 +8,7 @@ import type { SoftDeleteConfig } from '@lamalibre/sync-shared';
 import {
   loadConfig,
   loadActiveProjects,
+  loadAgents,
   decryptStorageConfig,
   addHistoryEntry,
   updateHistoryEntry,
@@ -17,6 +18,7 @@ import {
   getActiveOperation,
   upsertSavings,
   clearSavings,
+  verifyAgentToken,
   NotFoundError,
 } from '../lib/state.js';
 
@@ -164,6 +166,40 @@ export async function agentRoutes(app: FastifyInstance): Promise<void> {
     },
     async (request, reply) => {
       const report = request.body;
+
+      // Verify the reporting agent's token. The agent sends X-Agent-Token
+      // on all requests; if any registered agent has a token hash, we require
+      // a valid token from one of them.
+      const agentTokenHeader = request.headers['x-agent-token'] as string | undefined;
+      if (agentTokenHeader) {
+        const agents = await loadAgents();
+        let tokenValid = false;
+        for (const agent of agents) {
+          if (agent.agentTokenHash) {
+            const valid = await verifyAgentToken(agent.id, agentTokenHeader);
+            if (valid) {
+              tokenValid = true;
+              break;
+            }
+          }
+        }
+        if (!tokenValid) {
+          return reply.status(403).send({
+            ok: false,
+            error: 'Invalid agent token.',
+          });
+        }
+      } else {
+        // If no token header but any agent has a stored hash, reject
+        const agents = await loadAgents();
+        const anyTokenRequired = agents.some((a) => Boolean(a.agentTokenHash));
+        if (anyTokenRequired) {
+          return reply.status(403).send({
+            ok: false,
+            error: 'Agent token required. Send X-Agent-Token header.',
+          });
+        }
+      }
 
       // Verify project exists (include soft-deleted — an in-flight sync may complete after deletion)
       let project;

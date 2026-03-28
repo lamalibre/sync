@@ -40,7 +40,7 @@ Each provider requires different credentials:
 **DigitalOcean Spaces:**
 - `accessKey` — Spaces access key
 - `secretKey` — Spaces secret key
-- `endpoint` — e.g., `https://ams3.digitaloceanspaces.com` (full URL required)
+- `endpoint` — full URL with region prefix, e.g., `https://ams3.digitaloceanspaces.com`. The format is `https://<region>.digitaloceanspaces.com` where `<region>` is one of `nyc3`, `ams3`, `sgp1`, `sfo3`, `fra1`, `syd1`, etc.
 - `bucket` — bucket name
 
 **AWS S3:**
@@ -93,6 +93,8 @@ endpoint = ams3.digitaloceanspaces.com
 acl = private
 ```
 
+> **Note:** When region is provided, the rclone config endpoint is built as `<region>.digitaloceanspaces.com` (hostname only). When region is omitted and only endpoint is provided, the endpoint value is used as-is.
+
 **AWS S3 → rclone S3 with AWS provider:**
 ```ini
 [sync-remote]
@@ -136,8 +138,11 @@ provider = Other
 access_key_id = <key>
 secret_access_key = <secret>
 endpoint = <endpoint>
-force_path_style = true
+acl = private
+force_path_style = true  # only when forcePathStyle is enabled
 ```
+
+> **Note:** `force_path_style = true` is only applicable to custom S3-compatible providers (type `custom`). Standard providers like AWS S3 and DigitalOcean Spaces use virtual-hosted-style addressing and do not set this flag.
 
 ### Config Builder
 

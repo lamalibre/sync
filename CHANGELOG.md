@@ -44,6 +44,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Add rclone crypt remote overlay generation for encrypted projects with `rclone obscure` password handling via stdin
 - Add `sanitizeRcloneError` utility to redact credential patterns from rclone error messages before logging
 - Add deployment use cases guide with real-world deployment scenarios
+- Add CLI commands: `agents` (list/detail/delete agents), `storage` (configure/test/create-bucket), `project-create`, `project-edit`, `history`, `health` — full CLI/desktop feature parity
+- Add desktop Preview view with dry-run diff display, approve/reject actions, and 10-second auto-refresh
+- Add desktop Trash view with project selector, per-entry restore, purge with age filter
+- Add desktop agent path approval management with access mode, confirm mode, and delete threshold controls
+- Add desktop soft-delete restore and permanent delete with confirmation in Dashboard and ProjectDetail views
+- Add server preview routes (`GET/POST /api/sync/previews`) and approval routes (`GET/POST/DELETE /api/sync/approvals`)
+- Add server trash routes to plugin mode (previously standalone-only)
+- Add `SYNC_API_KEY` environment variable fallback for CLI authentication
+- Add `SYNC_STORAGE_ACCESS_KEY` / `SYNC_STORAGE_SECRET_KEY` env var alternatives for non-interactive storage configuration
+- Add shared `formatRelativeTime` and `formatBytes` utilities in desktop app (extracted from duplicated inline copies)
+- Add glossary terms: access mode, agent token, confirm mode, path approval, setup token, sync preview
 
 ### Changed
 
@@ -61,6 +72,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Validate glob metacharacters in restore file paths now includes `]`, `\`, `}`
 - Remove `localPath` from server-side project model — local paths are now agent-only via `approved-paths.json`
 - Sanitize rclone child process environment with `extendEnv: false` to prevent leaking parent env vars
+- Strip `localPath` from all server API responses (previews, approvals) — local paths never cross the network
+- Require `X-Agent-Token` on all agent mutation endpoints (heartbeat, project assignment, deletion, reports) — not just heartbeat
+- Cap agent registrations at MAX_AGENTS=50 with HTTP 409 on overflow
+- Encrypt API key and agent token at rest in `agent-settings.json` using agent master key (backward-compatible with plaintext)
 
 ### Fixed
 
@@ -71,6 +86,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Fix dry-run failure silently bypassing confirm mode — now correctly blocks sync when preview cannot be generated
 - Fix `buildSyncEndpoints` silently treating bidirectional as push — now throws to enforce `runRcloneBisync` usage
 - Fix `writeExclusiveFile` missing fsync before close for temporary rclone config files
+- Fix desktop `formatBytes` returning `NaN undefined` for negative byte values
+- Fix desktop `formatRelativeTime` showing negative durations for clock-skewed timestamps
+- Fix desktop API client crashing on non-JSON server error responses (e.g., HTML proxy errors)
+- Fix CLI `parseInt` for `--watch-debounce`, `--limit` flags silently sending `NaN` to server
+- Fix CLI `project-edit` unable to clear bandwidth limit (now sends `null` to unset)
+- Fix unhandled promise rejections in desktop `$effect` blocks and async event handlers
 
 ### Security
 
@@ -79,6 +100,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Validate remote trash directory names before `rclone purge` to prevent path traversal
 - Use exclusive file creation (`O_CREAT|O_EXCL`) for master key generation to prevent race-condition key overwrite causing data loss
 - Validate pending sync preview action values to reject tampered files with unknown actions
+- Require `X-Setup-Token` header in create-sync installer for initial API key generation — prevents race-condition takeover
+- Use cryptographically random filenames and exclusive open (`O_CREAT|O_EXCL`) for temp rclone.conf in installer — prevents symlink race in shared /tmp
+- Add URL credential stripping (`://***@`) to rclone error sanitizer — catches `https://key:secret@endpoint` patterns
+- Add Zod refinements for null bytes and `..` traversal on approval `localPath` field (defense-in-depth alongside `validateLocalPath`)
+- Remove `localPath` from server log output in approval routes — prevents local filesystem paths from appearing in remote server logs
+
+**Affected packages:** `@lamalibre/sync-server` 0.1.1, `@lamalibre/sync-agent` 0.1.2, `@lamalibre/sync-cli` 0.1.1, `@lamalibre/sync-desktop` 0.1.0, `@lamalibre/sync-shared` 0.1.2, `@lamalibre/create-sync` 0.1.1
 
 ## [0.1.0] - 2026-03-24
 

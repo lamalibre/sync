@@ -18,6 +18,12 @@ import { projectRestoreCommand } from './commands/project-restore.js';
 import { trashRestoreCommand } from './commands/trash-restore.js';
 import { agentApproveCommand } from './commands/agent-approve.js';
 import { previewCommand } from './commands/preview.js';
+import { agentsCommand } from './commands/agents.js';
+import { storageCommand } from './commands/storage.js';
+import { projectCreateCommand } from './commands/project-create.js';
+import { projectEditCommand } from './commands/project-edit.js';
+import { historyCommand } from './commands/history.js';
+import { healthCommand } from './commands/health.js';
 
 export const PACKAGE_NAME = '@lamalibre/sync-cli';
 
@@ -79,8 +85,14 @@ ${pc.bold('Commands:')}
   restore [project]     Restore archived files from cloud storage
   config                Show current configuration
   projects              List projects (interactive detail selection)
+  project-create        Create a new project
+  project-edit [id]     Edit an existing project
   project-delete [id]   Delete a project (soft delete by default)
   project-restore [id]  Restore a soft-deleted project
+  agents [agent-id]     List or manage agents
+  storage [subcommand]  Configure and test storage (configure, test, create-bucket)
+  history [project-id]  Show operation history
+  health                Test server connection
   trash-list [project]  List trash entries for a project
   trash-purge [project] Purge trash for a project
   trash-restore [project] [timestamp] Restore files from trash
@@ -91,7 +103,7 @@ ${pc.bold('Commands:')}
 
 ${pc.bold('Global Flags:')}
   --server <url>      Server URL (default: http://localhost:9393)
-  --api-key <key>     API key for authentication
+  --api-key <key>     API key for authentication (or SYNC_API_KEY env var)
   --json              Output in JSON format (non-interactive)
   --yes               Skip confirmation prompts
   --project <id>      Specify project ID (non-interactive)
@@ -110,6 +122,37 @@ ${pc.bold('Preview Flags:')}
   --approve           Approve a pending sync
   --reject            Reject a pending sync
 
+${pc.bold('Agents Flags:')}
+  --delete            Remove the specified agent
+
+${pc.bold('Storage Configure Flags:')}
+  --provider <type>   Provider type (spaces, s3, gcs, azure, b2, custom, local)
+  --endpoint <url>    Storage endpoint URL
+  --bucket <name>     Bucket name
+  --region <region>   Region (optional)
+  --access-key <key>  Access key (or SYNC_STORAGE_ACCESS_KEY env var)
+  --secret-key <key>  Secret key (or SYNC_STORAGE_SECRET_KEY env var)
+  --encrypt           Enable encryption at rest
+  --encrypt-password <pw>  Encryption password (min 12 chars)
+
+  ${pc.dim('Note: --access-key and --secret-key expose secrets in process arguments.')}
+  ${pc.dim('Prefer SYNC_STORAGE_ACCESS_KEY and SYNC_STORAGE_SECRET_KEY env vars.')}
+
+${pc.bold('Project Create/Edit Flags:')}
+  --name <name>       Project name
+  --remote-path <p>   Remote path
+  --direction <d>     push, pull, or bidirectional
+  --trigger <t>       manual, watch, schedule, or watch+schedule
+  --conflict-strategy <s>  newest-wins, local-wins, remote-wins, or manual
+  --encrypt           Enable encryption
+  --encrypt-password <pw>  Encryption password (min 12 chars)
+  --excludes <pats>   Comma-separated exclude patterns
+  --bandwidth-limit <l>    Bandwidth limit (e.g. 10M, 500k)
+  --watch-debounce <ms>    Watch debounce in ms (500-60000)
+
+${pc.bold('History Flags:')}
+  --limit <n>         Number of entries to show (default: 20)
+
 ${pc.bold('Delete/Restore Flags:')}
   --permanent         Hard delete (project-delete only)
   --older-than <7d>   Purge trash older than N days (trash-purge only)
@@ -119,8 +162,19 @@ ${pc.bold('Examples:')}
   sync trigger my-project --yes
   sync archive my-project --json
   sync projects --detail my-project
+  sync project-create --name my-project --direction push --trigger watch
+  sync project-edit my-project --direction bidirectional
   sync project-delete my-project --permanent --yes
   sync project-restore my-project
+  sync agents
+  sync agents <agent-id> --delete --yes
+  sync storage
+  sync storage configure
+  sync storage test
+  sync storage create-bucket --yes
+  sync history
+  sync history my-project --limit 50
+  sync health
   sync trash-list my-project
   sync trash-purge my-project --older-than 7d --yes
   sync agent-approve --list
@@ -147,7 +201,7 @@ export async function main(): Promise<void> {
   const json = flags['json'] === true;
   const yes = flags['yes'] === true;
   const server = typeof flags['server'] === 'string' ? flags['server'] : undefined;
-  const apiKey = typeof flags['api-key'] === 'string' ? flags['api-key'] : undefined;
+  const apiKey = typeof flags['api-key'] === 'string' ? flags['api-key'] : (process.env['SYNC_API_KEY'] ?? undefined);
   const project = typeof flags['project'] === 'string' ? flags['project'] : undefined;
   const detail = typeof flags['detail'] === 'string' ? flags['detail'] : undefined;
   const permanent = flags['permanent'] === true;
@@ -160,6 +214,24 @@ export async function main(): Promise<void> {
   const confirmMode = typeof flags['confirm-mode'] === 'string' ? flags['confirm-mode'] : undefined;
   const deleteThreshold = typeof flags['delete-threshold'] === 'string' ? flags['delete-threshold'] : undefined;
   const pathFlag = typeof flags['path'] === 'string' ? flags['path'] : undefined;
+  const deleteFlag = flags['delete'] === true;
+  const limit = typeof flags['limit'] === 'string' ? flags['limit'] : undefined;
+  const provider = typeof flags['provider'] === 'string' ? flags['provider'] : undefined;
+  const endpoint = typeof flags['endpoint'] === 'string' ? flags['endpoint'] : undefined;
+  const bucket = typeof flags['bucket'] === 'string' ? flags['bucket'] : undefined;
+  const region = typeof flags['region'] === 'string' ? flags['region'] : undefined;
+  const accessKey = typeof flags['access-key'] === 'string' ? flags['access-key'] : undefined;
+  const secretKey = typeof flags['secret-key'] === 'string' ? flags['secret-key'] : undefined;
+  const encrypt = flags['encrypt'] === true;
+  const encryptPassword = typeof flags['encrypt-password'] === 'string' ? flags['encrypt-password'] : undefined;
+  const name = typeof flags['name'] === 'string' ? flags['name'] : undefined;
+  const remotePath = typeof flags['remote-path'] === 'string' ? flags['remote-path'] : undefined;
+  const direction = typeof flags['direction'] === 'string' ? flags['direction'] : undefined;
+  const trigger = typeof flags['trigger'] === 'string' ? flags['trigger'] : undefined;
+  const conflictStrategy = typeof flags['conflict-strategy'] === 'string' ? flags['conflict-strategy'] : undefined;
+  const excludes = typeof flags['excludes'] === 'string' ? flags['excludes'] : undefined;
+  const bandwidthLimit = typeof flags['bandwidth-limit'] === 'string' ? flags['bandwidth-limit'] : undefined;
+  const watchDebounce = typeof flags['watch-debounce'] === 'string' ? flags['watch-debounce'] : undefined;
 
   // Commands that don't need the API client
   if (command === 'help' || command === '--help' || command === '-h') {
@@ -256,6 +328,67 @@ export async function main(): Promise<void> {
           reject,
           agentDir,
         });
+        break;
+
+      case 'agents':
+        await agentsCommand(client, positional[0], { json, yes, delete: deleteFlag });
+        break;
+
+      case 'storage':
+        await storageCommand(client, positional[0], {
+          json,
+          yes,
+          provider,
+          endpoint,
+          bucket,
+          region,
+          accessKey,
+          secretKey,
+          encrypt,
+          encryptPassword,
+        });
+        break;
+
+      case 'project-create':
+        await projectCreateCommand(client, {
+          json,
+          name,
+          remotePath,
+          direction,
+          trigger,
+          conflictStrategy,
+          encrypt,
+          encryptPassword,
+          excludes,
+          bandwidthLimit,
+          watchDebounce,
+        });
+        break;
+
+      case 'project-edit':
+        await projectEditCommand(client, positional[0], {
+          project,
+          json,
+          yes,
+          name,
+          remotePath,
+          direction,
+          trigger,
+          conflictStrategy,
+          encrypt,
+          encryptPassword,
+          excludes,
+          bandwidthLimit,
+          watchDebounce,
+        });
+        break;
+
+      case 'history':
+        await historyCommand(client, positional[0], { json, limit, project });
+        break;
+
+      case 'health':
+        await healthCommand(client, { json });
         break;
 
       default:

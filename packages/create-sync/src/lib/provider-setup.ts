@@ -2,9 +2,10 @@ import * as p from '@clack/prompts';
 import pc from 'picocolors';
 import { execa } from 'execa';
 import { buildRcloneIni } from '@lamalibre/sync-shared';
-import { writeFile, mkdir } from 'node:fs/promises';
+import { mkdir, open as fsOpen } from 'node:fs/promises';
 import { join } from 'node:path';
 import { tmpdir } from 'node:os';
+import { randomBytes } from 'node:crypto';
 
 // ---------------------------------------------------------------------------
 // Provider definitions
@@ -186,11 +187,18 @@ export async function testConnection(setup: StorageSetup): Promise<boolean> {
   spinner.start('Testing connection...');
 
   const confContent = buildRcloneConfig(setup);
-  const confPath = join(tmpdir(), `sync-test-${Date.now()}.conf`);
+  const confPath = join(tmpdir(), `sync-test-${randomBytes(16).toString('hex')}.conf`);
 
   try {
     await mkdir(tmpdir(), { recursive: true });
-    await writeFile(confPath, confContent, { mode: 0o600 });
+    // Use O_CREAT | O_EXCL ('wx') to prevent symlink races on the temp file
+    const fd = await fsOpen(confPath, 'wx', 0o600);
+    try {
+      await fd.writeFile(confContent);
+      await fd.sync();
+    } finally {
+      await fd.close();
+    }
 
     await execa('rclone', ['lsd', `sync-remote:${setup.bucket}`, '--config', confPath]);
 

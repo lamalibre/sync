@@ -144,6 +144,7 @@ Agent registry.
       "projectIds": ["training-data", "documents"],
       "lastHeartbeat": "2026-03-24T10:30:15.000Z",
       "registeredAt": "2026-03-20T09:00:00.000Z",
+      "agentTokenHash": "sha256hex...",
       "activeSyncs": [],
       "diskUsage": {
         "totalBytes": 500000000000,
@@ -157,6 +158,9 @@ Agent registry.
 
 - **Online/offline:** Agent is online if `lastHeartbeat` is within 30 seconds of now
 - **Project assignment:** `projectIds` controls which projects the agent receives
+- **Agent token:** Stored as SHA-256 hash (`agentTokenHash`). The raw token is returned once on registration. Never exposed in API responses.
+- **Re-registration:** If an agent with the same name + hostname registers again, it is updated with a new token.
+- **Capacity:** Maximum 50 agents (returns 409 on registration when full)
 
 ### `master.key`
 
@@ -171,20 +175,21 @@ Random 32-byte hex string used to derive encryption keys.
 
 ### `agent-settings.json`
 
-Agent configuration.
+Agent configuration. The `apiKey` and `agentToken` fields are encrypted at rest using AES-256-GCM with the agent's master key.
 
 ```json
 {
   "serverUrl": "http://192.168.1.100:9393",
-  "apiKey": "sync_a1b2c3d4...",
+  "apiKey": "<encrypted-base64>",
   "pollIntervalMs": 30000,
   "agentId": "a1b2c3d4-e5f6-7890-abcd-ef1234567890",
   "agentName": "office-mac",
-  "agentToken": "..."
+  "agentToken": "<encrypted-base64>"
 }
 ```
 
 - Mode `0600`
+- **Encryption:** `apiKey` and `agentToken` are encrypted with AES-256-GCM (scrypt key derivation from agent master key). For backward compatibility, plaintext values from earlier versions are detected and read transparently.
 
 ### `cached-config.json`
 

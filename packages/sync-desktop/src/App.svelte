@@ -3,6 +3,8 @@
   import ProjectDetail from "./views/ProjectDetail.svelte";
   import StorageSetup from "./views/StorageSetup.svelte";
   import Agents from "./views/Agents.svelte";
+  import Preview from "./views/Preview.svelte";
+  import Trash from "./views/Trash.svelte";
   import Settings from "./views/Settings.svelte";
   import {
     LayoutDashboard,
@@ -11,6 +13,8 @@
     Database,
     ArrowLeft,
     Monitor,
+    Eye,
+    Trash2,
   } from "lucide-svelte";
 
   type View =
@@ -18,6 +22,8 @@
     | { name: "project"; projectId: string }
     | { name: "storage" }
     | { name: "agents" }
+    | { name: "preview" }
+    | { name: "trash" }
     | { name: "settings" };
 
   let currentView: View = $state({ name: "dashboard" });
@@ -36,8 +42,10 @@
 
   const navItems = [
     { name: "dashboard" as const, label: "Dashboard", icon: LayoutDashboard },
+    { name: "preview" as const, label: "Preview", icon: Eye },
     { name: "storage" as const, label: "Storage", icon: Database },
     { name: "agents" as const, label: "Agents", icon: Monitor },
+    { name: "trash" as const, label: "Trash", icon: Trash2 },
     { name: "settings" as const, label: "Settings", icon: SettingsIcon },
   ];
 
@@ -97,6 +105,10 @@
       <StorageSetup />
     {:else if currentView.name === "agents"}
       <Agents />
+    {:else if currentView.name === "preview"}
+      <Preview />
+    {:else if currentView.name === "trash"}
+      <Trash />
     {:else if currentView.name === "settings"}
       <Settings />
     {/if}

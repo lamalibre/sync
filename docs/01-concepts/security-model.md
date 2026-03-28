@@ -21,6 +21,9 @@ Storage credentials (access keys, secret keys, encryption passwords) are encrypt
 | Master key | `~/.sync/master.key` (random 32-byte hex, mode 0600) |
 | Encrypted credentials | `sync-config.json` (AES-256-GCM with scrypt key derivation) |
 | API key | SHA-256 hash only (raw key shown once during setup) |
+| Agent token hash | SHA-256 hash in `agents.json` (raw token shown once on registration) |
+
+On the agent side, the API key and agent token in `agent-settings.json` are also encrypted at rest using AES-256-GCM with the agent's own master key. Backward-compatible: plaintext values from earlier versions are detected and read transparently.
 
 Even if an attacker reads the config file, the credentials are ciphertext without the master key.
 
@@ -81,7 +84,36 @@ When enabled per-project, files are encrypted before leaving your machine:
 
 See [Encryption](encryption.md) for details.
 
-#### 7. Atomic File Writes
+#### 7. Agent Token Verification
+
+All agent mutation endpoints verify the per-agent `X-Agent-Token` header:
+
+- `POST /api/sync/agents/:id/heartbeat`
+- `PATCH /api/sync/agents/:id/projects`
+- `DELETE /api/sync/agents/:id`
+- `POST /api/sync/agent-report`
+
+The token is generated on registration, returned once, and stored as a SHA-256 hash. Verification uses constant-time comparison. If any registered agent has a stored token hash, the server requires a valid token from all agents.
+
+#### 8. Error Message Sanitization
+
+rclone error messages are sanitized before storage or display to prevent credential leakage:
+
+- URL credentials stripped (e.g., `https://key:secret@host` becomes `https://***@host`)
+- Absolute file paths to config/key files redacted
+- Credential key=value pairs (access_key_id, secret_access_key, password, etc.) redacted
+- Output truncated to 2048 characters
+
+This sanitization is shared between sync-server and sync-agent via `sanitizeRcloneError()` in sync-shared.
+
+#### 9. Capacity Limits
+
+The server enforces hard limits to prevent resource exhaustion:
+
+- **MAX_AGENTS = 50** -- registration returns 409 when the limit is reached
+- **MAX_PROJECTS = 100** -- project creation returns 409 when the limit is reached
+
+#### 10. Atomic File Writes
 
 All state files use the temp → fsync → rename pattern. This prevents:
 - Partial reads (file is either old or new, never half-written)
@@ -124,11 +156,14 @@ Decryption reverses the process: unpack, derive key from salt, decrypt with GCM 
 ### API Key Authentication
 
 **Setup flow:**
-1. Server starts, generates one-time setup token, logs it
-2. Admin calls `POST /api/sync/setup/api-key` with `X-Setup-Token` header
+1. Server starts, generates a one-time setup token, logs it to console
+2. Admin calls `POST /api/sync/setup/api-key` with `X-Setup-Token` header (constant-time comparison)
 3. Server generates random API key (`sync_<random>`)
-4. Server stores SHA-256 hash of key
+4. Server stores SHA-256 hash of key in `sync-config.json`
 5. Raw key returned in response (shown once, never retrievable)
+
+**Regeneration flow:**
+When an API key already exists, `POST /api/sync/setup/api-key` requires a valid `Authorization: Bearer <existing-key>` header (enforced by the auth hook). The setup token is only required for the initial key generation.
 
 **Verification:**
 - Agent/admin sends `Authorization: Bearer <api-key>`
@@ -197,6 +232,9 @@ This is enforced project-wide. The `child_process` module and string interpolati
 | Process isolation | execa array args + config file | Credentials from process listings |
 | Path validation | Zod + normalization | Directory traversal attacks |
 | Client-side encryption | rclone crypt (NaCl) | File data in the cloud |
+| Agent token verification | SHA-256 hash + constant-time compare | Unauthorized agent mutations |
+| Error sanitization | Regex redaction of URLs, paths, credentials | Credential leakage in error messages |
+| Capacity limits | MAX_AGENTS=50, MAX_PROJECTS=100 | Resource exhaustion |
 | Atomic writes | temp → fsync → rename | State file corruption |
 | API key hashing | SHA-256 + constant-time compare | Key theft and timing attacks |
 

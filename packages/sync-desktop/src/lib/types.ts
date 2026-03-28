@@ -243,3 +243,82 @@ export interface CreateBucketResponse {
   bucket: string;
   created: boolean;
 }
+
+// ---------------------------------------------------------------------------
+// Preview / Dry-run types
+// ---------------------------------------------------------------------------
+
+export type AccessMode = 'full' | 'push-only' | 'pull-only' | 'protected';
+
+export type ConfirmMode = 'auto' | 'confirm-destructive' | 'confirm-always';
+
+export interface DryRunChange {
+  readonly path: string;
+  readonly action: 'copy' | 'delete';
+}
+
+export interface PendingSyncPreview {
+  readonly projectId: string;
+  readonly projectName: string;
+  readonly operationId: string;
+  readonly direction: SyncDirection;
+  readonly localPath?: string;
+  readonly remotePath: string;
+  readonly trigger: 'manual' | 'watch' | 'schedule';
+  readonly createdAt: string;
+  readonly expiresAt: string;
+  readonly status: 'pending' | 'approved' | 'rejected';
+  readonly copyCount: number;
+  readonly deleteCount: number;
+  readonly changes: readonly DryRunChange[];
+}
+
+export interface PreviewListResponse {
+  previews: PendingSyncPreview[];
+}
+
+export interface PreviewResponse {
+  preview: PendingSyncPreview;
+}
+
+// ---------------------------------------------------------------------------
+// Trash types
+// ---------------------------------------------------------------------------
+
+export interface TrashEntry {
+  timestamp: string;
+  fileCount: number;
+}
+
+export interface TrashResponse {
+  projectId: string;
+  entries: TrashEntry[];
+}
+
+// ---------------------------------------------------------------------------
+// Approved path types
+// ---------------------------------------------------------------------------
+
+export interface ApprovedPathEntry {
+  readonly projectId: string;
+  readonly localPath?: string;
+  readonly approvedAt: string;
+  readonly projectName: string;
+  readonly accessMode?: AccessMode;
+  readonly confirmMode?: ConfirmMode;
+  readonly deleteThreshold?: number;
+}
+
+export interface ApprovedPathsResponse {
+  version: 1;
+  entries: ApprovedPathEntry[];
+}
+
+export interface ApprovePathInput {
+  projectId: string;
+  localPath: string;
+  projectName: string;
+  accessMode?: AccessMode;
+  confirmMode?: ConfirmMode;
+  deleteThreshold?: number;
+}

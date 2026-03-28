@@ -6,6 +6,8 @@
  */
 export function sanitizeRcloneError(msg: string): string {
   return msg
+    // Strip URL credentials (e.g. https://key:secret@endpoint/bucket)
+    .replace(/:\/\/[^@\s]+@/g, '://***@')
     // Strip absolute file paths (Unix and Windows)
     .replace(/\/[^\x00-\x1f:*?"<>|]+\.(conf|cfg|ini|key|json|pem|env|bak|p12|toml)/g, '<redacted-path>')
     .replace(/[A-Z]:\\[\w.\\ -]+\.(conf|cfg|ini|key|json|pem|env|bak|p12|toml)/gi, '<redacted-path>')

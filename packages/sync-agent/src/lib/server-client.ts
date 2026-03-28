@@ -19,6 +19,8 @@ export interface ServerClientOptions {
    * authentication happens at the TLS layer.
    */
   readonly httpsAgent?: Dispatcher;
+  /** Per-agent authentication token for X-Agent-Token header. */
+  readonly agentToken?: string;
 }
 
 /** Registration payload sent to POST /api/sync/agents. */
@@ -69,6 +71,7 @@ export class ServerClient {
   private readonly logger: Logger;
   private readonly dispatcher: Dispatcher | undefined;
   private readonly pluginMode: boolean;
+  private agentToken: string | undefined;
 
   constructor(options: ServerClientOptions) {
     // Normalize server URL: remove trailing slash
@@ -77,10 +80,18 @@ export class ServerClient {
     this.logger = options.logger.child({ component: 'server-client' });
     this.dispatcher = options.httpsAgent;
     this.pluginMode = options.httpsAgent !== undefined;
+    this.agentToken = options.agentToken;
 
     if (this.pluginMode) {
       this.logger.info('ServerClient configured for plugin mode (mTLS)');
     }
+  }
+
+  /**
+   * Update the stored agent token (e.g. after registration returns a new token).
+   */
+  setAgentToken(token: string): void {
+    this.agentToken = token;
   }
 
   /**
@@ -124,9 +135,14 @@ export class ServerClient {
       'Reporting sync result to server',
     );
 
+    const headers = this.buildHeaders();
+    if (this.agentToken) {
+      headers['X-Agent-Token'] = this.agentToken;
+    }
+
     const response = await fetch(url, {
       method: 'POST',
-      headers: this.buildHeaders(),
+      headers,
       body: JSON.stringify(report),
       signal: AbortSignal.timeout(30_000),
       ...(this.dispatcher ? { dispatcher: this.dispatcher } : {}),

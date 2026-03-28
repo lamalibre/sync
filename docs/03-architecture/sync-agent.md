@@ -8,6 +8,8 @@ The agent is the worker. It runs on the machine with the files and does the actu
 
 The agent never stores project definitions or credentials permanently in plaintext. It receives them from the server on each poll, uses them to generate a temporary rclone config, and caches them encrypted for offline resilience.
 
+The agent's own settings (`agent-settings.json`) are also protected: the API key and agent token fields are encrypted at rest using AES-256-GCM with the agent's master key. On read, they are transparently decrypted. Plaintext values from earlier versions are detected and handled for backward compatibility.
+
 ## Daemon Lifecycle
 
 ```
@@ -39,6 +41,7 @@ The agent never stores project definitions or credentials permanently in plainte
 
 4. Heartbeat (every 15 seconds)
    └── POST /api/sync/agents/:id/heartbeat
+   └── Headers: X-Agent-Token (per-agent auth)
    └── Body: activeSyncs[], diskUsage
 
 5. Shutdown
@@ -250,9 +253,11 @@ The config is regenerated idempotently — the output is the same if nothing cha
 | `src/lib/archive.ts` | Archive scan and stub generation |
 | `src/lib/stub.ts` | Stub file read/write |
 | `src/lib/bisync-state.ts` | Bisync baseline tracking |
+| `src/lib/dry-run-parser.ts` | rclone `--dry-run` output parsing for sync previews |
+| `src/lib/pending-sync.ts` | Re-exports pending sync preview utilities from sync-shared |
 | `src/lib/progress-parser.ts` | rclone stderr progress parsing |
 | `src/lib/server-client.ts` | HTTP client for server API |
-| `src/lib/config.ts` | Agent settings management |
+| `src/lib/config.ts` | Agent settings management (encrypted API key and agent token at rest) |
 | `src/lib/plugin-mode.ts` | Portlama plugin mode support |
 | `src/lib/types.ts` | Agent-specific type definitions |
 

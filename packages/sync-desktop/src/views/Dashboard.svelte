@@ -1,6 +1,12 @@
 <script lang="ts">
-  import { getStatus, getProjects } from "../lib/api.js";
+  import {
+    getStatus,
+    getProjects,
+    getProjects_includeDeleted,
+    restoreProject,
+  } from "../lib/api.js";
   import type { GlobalStatus, Project } from "../lib/types.js";
+  import { formatRelativeTime, formatBytes } from "../lib/format.js";
   import ProjectFormModal from "../components/ProjectFormModal.svelte";
   import {
     RefreshCw,
@@ -11,6 +17,8 @@
     CheckCircle2,
     Loader2,
     Plus,
+    Undo2,
+    Trash2,
   } from "lucide-svelte";
 
   interface Props {
@@ -21,20 +29,27 @@
 
   let status: GlobalStatus | null = $state(null);
   let projects: Project[] = $state([]);
+  let deletedProjects: Project[] = $state([]);
   let loading = $state(true);
   let error: string | null = $state(null);
   let showCreateModal = $state(false);
+  let showDeleted = $state(false);
+  let restoreInProgress: string | null = $state(null);
 
   async function refresh(): Promise<void> {
     loading = true;
     error = null;
     try {
-      const [statusRes, projectsRes] = await Promise.all([
+      const [statusRes, projectsRes, allProjectsRes] = await Promise.all([
         getStatus(),
         getProjects(),
+        getProjects_includeDeleted(),
       ]);
       status = statusRes;
       projects = projectsRes.projects;
+      deletedProjects = allProjectsRes.projects.filter(
+        (p) => p.deletedAt !== null,
+      );
     } catch (err: unknown) {
       error =
         err instanceof Error ? err.message : "Failed to connect to server";
@@ -43,13 +58,26 @@
     }
   }
 
+  async function handleRestoreProject(projectId: string): Promise<void> {
+    restoreInProgress = projectId;
+    try {
+      await restoreProject(projectId);
+      await refresh();
+    } catch (err: unknown) {
+      error =
+        err instanceof Error ? err.message : "Failed to restore project";
+    } finally {
+      restoreInProgress = null;
+    }
+  }
+
   // Adaptive polling: 5s when syncing, 30s otherwise
   let hasSyncing = $derived(projects.some((p) => p.status === "syncing"));
 
   $effect(() => {
-    refresh();
+    void refresh();
     const interval = setInterval(
-      () => { refresh(); },
+      () => { void refresh(); },
       hasSyncing ? 5_000 : 30_000,
     );
     return () => clearInterval(interval);
@@ -75,26 +103,6 @@
     }
   }
 
-  function formatRelativeTime(iso: string | null): string {
-    if (!iso) return "Never";
-    const diff = Date.now() - new Date(iso).getTime();
-    const seconds = Math.floor(diff / 1000);
-    if (seconds < 60) return `${seconds}s ago`;
-    const minutes = Math.floor(seconds / 60);
-    if (minutes < 60) return `${minutes}m ago`;
-    const hours = Math.floor(minutes / 60);
-    if (hours < 24) return `${hours}h ago`;
-    const days = Math.floor(hours / 24);
-    return `${days}d ago`;
-  }
-
-  function formatBytes(bytes: number): string {
-    if (bytes === 0) return "0 B";
-    const units = ["B", "KB", "MB", "GB", "TB"];
-    const i = Math.floor(Math.log(bytes) / Math.log(1024));
-    const value = bytes / Math.pow(1024, i);
-    return `${value.toFixed(i > 0 ? 1 : 0)} ${units[i]}`;
-  }
 </script>
 
 <div class="p-6">
@@ -223,6 +231,65 @@
           </div>
         </button>
       {/each}
+    </div>
+  {/if}
+
+  <!-- Deleted projects -->
+  {#if deletedProjects.length > 0}
+    <div class="mt-8">
+      <button
+        class="mb-3 flex items-center gap-2 text-sm font-medium text-text-secondary transition-colors hover:text-text-primary"
+        onclick={() => (showDeleted = !showDeleted)}
+      >
+        <Trash2 class="h-4 w-4" />
+        Deleted Projects ({deletedProjects.length})
+        <span class="text-xs">
+          {showDeleted ? "Hide" : "Show"}
+        </span>
+      </button>
+
+      {#if showDeleted}
+        <div class="grid grid-cols-1 gap-3 lg:grid-cols-2 xl:grid-cols-3">
+          {#each deletedProjects as project}
+            <div
+              class="flex flex-col rounded-lg border border-border bg-card p-4 opacity-60"
+            >
+              <div class="mb-2 flex items-center justify-between">
+                <h3 class="text-sm font-medium text-text-primary">
+                  {project.name}
+                </h3>
+                <span
+                  class="rounded-full bg-error/15 px-2 py-0.5 text-xs font-medium text-error"
+                >
+                  deleted
+                </span>
+              </div>
+
+              <p class="mb-3 truncate text-xs text-text-secondary">
+                {project.remotePath}
+              </p>
+
+              <div class="mt-auto flex items-center justify-between">
+                <span class="text-xs text-text-secondary">
+                  Deleted: {formatRelativeTime(project.deletedAt)}
+                </span>
+                <button
+                  class="flex items-center gap-1.5 rounded-md border border-success/40 px-2.5 py-1 text-xs font-medium text-success transition-colors hover:bg-success/10 disabled:opacity-50"
+                  onclick={() => handleRestoreProject(project.id)}
+                  disabled={restoreInProgress === project.id}
+                >
+                  {#if restoreInProgress === project.id}
+                    <Loader2 class="h-3 w-3 animate-spin" />
+                  {:else}
+                    <Undo2 class="h-3 w-3" />
+                  {/if}
+                  Restore
+                </button>
+              </div>
+            </div>
+          {/each}
+        </div>
+      {/if}
     </div>
   {/if}
 </div>

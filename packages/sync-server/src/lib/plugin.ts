@@ -19,6 +19,9 @@ import { statusRoutes } from '../routes/status.js';
 import { agentRoutes } from '../routes/agent.js';
 import { agentRegistryRoutes } from '../routes/agents.js';
 import { archiveRoutes } from '../routes/archive.js';
+import { previewRoutes } from '../routes/previews.js';
+import { approvalRoutes } from '../routes/approvals.js';
+import { trashRoutes } from '../routes/trash.js';
 import { setupRoutes } from '../routes/setup.js';
 import { setDataDir } from './state.js';
 import { TicketInstanceManager, type TicketCertConfig } from '@lamalibre/portlama-tickets';
@@ -156,6 +159,9 @@ export function buildPlugin(options?: PluginOptions): FastifyPluginAsync {
     await app.register(agentRoutes);
     await app.register(agentRegistryRoutes);
     await app.register(archiveRoutes);
+    await app.register(trashRoutes);
+    await app.register(previewRoutes);
+    await app.register(approvalRoutes);
     await app.register(setupRoutes);
 
     app.log.info('Sync plugin routes registered');

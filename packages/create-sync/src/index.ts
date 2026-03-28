@@ -24,9 +24,11 @@ async function apiRequest<T>(
   path: string,
   body?: unknown,
   apiKey?: string,
+  extraHeaders?: Record<string, string>,
 ): Promise<T> {
   const headers: Record<string, string> = {
     'Content-Type': 'application/json',
+    ...extraHeaders,
   };
   if (apiKey) {
     headers['Authorization'] = `Bearer ${apiKey}`;
@@ -91,6 +93,18 @@ async function standaloneSetup(): Promise<void> {
 
   let apiKey: string | undefined;
   if (generateKey) {
+    const setupToken = await p.text({
+      message: 'Setup token (shown in server console on first start)',
+      validate: (v) => {
+        if (!v) return 'Setup token is required';
+        return undefined;
+      },
+    });
+    if (p.isCancel(setupToken)) {
+      p.cancel('Setup cancelled.');
+      process.exit(0);
+    }
+
     const keySpinner = p.spinner();
     keySpinner.start('Generating API key...');
     try {
@@ -98,6 +112,9 @@ async function standaloneSetup(): Promise<void> {
         serverUrl,
         'POST',
         '/api/sync/setup/api-key',
+        undefined,
+        undefined,
+        { 'X-Setup-Token': setupToken },
       );
       apiKey = result.apiKey;
       keySpinner.stop(pc.green('API key generated.'));
