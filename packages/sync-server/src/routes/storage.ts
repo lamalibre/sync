@@ -16,6 +16,7 @@ import {
   redactStorageConfig,
   getDataDir,
 } from '../lib/state.js';
+import { isPluginMode } from '../lib/plugin.js';
 
 export async function storageRoutes(app: FastifyInstance): Promise<void> {
   const server = app.withTypeProvider<ZodTypeProvider>();
@@ -48,6 +49,17 @@ export async function storageRoutes(app: FastifyInstance): Promise<void> {
       },
     },
     async (request, reply) => {
+      // In plugin mode with injected storage, Portlama manages storage config
+      if (isPluginMode()) {
+        const config = await loadConfig();
+        if (config.storagePrefix) {
+          return reply.status(409).send({
+            ok: false,
+            error: 'Storage is managed by Portlama in plugin mode. Use the Portlama panel to change storage configuration.',
+          });
+        }
+      }
+
       const body = request.body;
       const config = await loadConfig();
 
@@ -76,9 +88,15 @@ export async function storageRoutes(app: FastifyInstance): Promise<void> {
 
     await writeExclusiveFile(confPath, rcloneConf);
 
+    // When a storage prefix is configured (plugin mode), test within the
+    // prefixed path instead of the bucket root to verify isolation works.
+    const testPath = config.storagePrefix
+      ? `${decrypted.bucket}/${config.storagePrefix.replace(/\/$/, '')}`
+      : decrypted.bucket;
+
     const start = Date.now();
     try {
-      await execa('rclone', ['lsd', `sync-remote:${decrypted.bucket}`, '--config', confPath], {
+      await execa('rclone', ['lsd', `sync-remote:${testPath}`, '--config', confPath], {
         extendEnv: false,
         env: buildMinimalRcloneEnv(confPath),
       });
@@ -125,6 +143,15 @@ export async function storageRoutes(app: FastifyInstance): Promise<void> {
     },
     async (request, reply) => {
       const config = await loadConfig();
+
+      // In plugin mode with injected storage, Portlama manages buckets
+      if (isPluginMode() && config.storagePrefix) {
+        return reply.status(409).send({
+          ok: false,
+          error: 'Storage is managed by Portlama in plugin mode. Use the Portlama panel to manage buckets.',
+        });
+      }
+
       if (!config.storage) {
         return reply.status(400).send({
           ok: false,

@@ -10,6 +10,7 @@ import {
   loadActiveProjects,
   loadAgents,
   decryptStorageConfig,
+  prefixedRemotePath,
   addHistoryEntry,
   updateHistoryEntry,
   clearActiveOperation,
@@ -120,7 +121,7 @@ export async function agentRoutes(app: FastifyInstance): Promise<void> {
         return {
           id: p.id,
           name: p.name,
-          remotePath: p.remotePath,
+          remotePath: prefixedRemotePath(p.remotePath, config),
           direction: p.direction,
           includes: p.includes,
           excludes: p.excludes,

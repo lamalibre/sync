@@ -383,6 +383,8 @@ export interface ServerConfig {
   apiKeyHash?: string;
   /** Global soft delete configuration. */
   softDelete?: SoftDeleteConfig;
+  /** Bucket prefix for isolation (Portlama serverId UUID). Plugin mode only. */
+  storagePrefix?: string;
 }
 
 /** Storage config as persisted — credentials are encrypted at rest */

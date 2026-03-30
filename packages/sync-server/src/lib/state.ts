@@ -182,6 +182,22 @@ export function redactStorageConfig(enc: EncryptedStorageConfig): Record<string,
 }
 
 // ---------------------------------------------------------------------------
+// Storage prefix helper
+// ---------------------------------------------------------------------------
+
+/**
+ * Prepend the storage prefix to a remote path when configured.
+ * Used in plugin mode to isolate multiple Portlama servers sharing one bucket.
+ * The prefix is the Portlama server's UUID.
+ */
+export function prefixedRemotePath(remotePath: string, config: ServerConfig): string {
+  if (!config.storagePrefix) return remotePath;
+  const prefix = config.storagePrefix.replace(/\/$/, '');
+  const path = remotePath.replace(/^\//, '');
+  return `${prefix}/${path}`;
+}
+
+// ---------------------------------------------------------------------------
 // Projects
 // ---------------------------------------------------------------------------
 

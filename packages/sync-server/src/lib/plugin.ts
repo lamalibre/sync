@@ -23,7 +23,8 @@ import { previewRoutes } from '../routes/previews.js';
 import { approvalRoutes } from '../routes/approvals.js';
 import { trashRoutes } from '../routes/trash.js';
 import { setupRoutes } from '../routes/setup.js';
-import { setDataDir } from './state.js';
+import { setDataDir, loadConfig, saveConfig, encryptStorageConfig } from './state.js';
+import type { StorageConfig } from './schemas.js';
 import { TicketInstanceManager, type TicketCertConfig } from '@lamalibre/portlama-tickets';
 
 // ---------------------------------------------------------------------------
@@ -80,6 +81,21 @@ export interface PluginOptions {
    * Required when `panelUrl` is set.
    */
   readonly ticketCerts?: TicketCertConfig;
+
+  /**
+   * Storage configuration injected by Portlama.
+   * When provided, sync uses this instead of its own storage config.
+   * The `prefix` field ensures bucket isolation per Portlama server.
+   */
+  readonly storage?: {
+    readonly provider: string;
+    readonly region?: string;
+    readonly bucket: string;
+    readonly endpoint: string;
+    readonly accessKey: string;
+    readonly secretKey: string;
+    readonly prefix: string;
+  };
 }
 
 // ---------------------------------------------------------------------------
@@ -106,6 +122,28 @@ export function buildPlugin(options?: PluginOptions): FastifyPluginAsync {
 
     if (dataDir) {
       setDataDir(dataDir);
+    }
+
+    // Inject storage config from Portlama if provided.
+    // This converts the plaintext storage into sync's encrypted format and
+    // stores it via the normal state mechanism, making it indistinguishable
+    // from manually configured storage to all downstream code.
+    if (options?.storage) {
+      const injected = options.storage;
+      const plain: StorageConfig = {
+        provider: injected.provider as StorageConfig['provider'],
+        endpoint: injected.endpoint,
+        bucket: injected.bucket,
+        ...(injected.region ? { region: injected.region } : {}),
+        accessKey: injected.accessKey,
+        secretKey: injected.secretKey,
+        encryption: false,
+      };
+
+      const config = await loadConfig();
+      config.storage = await encryptStorageConfig(plain);
+      config.storagePrefix = injected.prefix;
+      await saveConfig(config);
     }
 
     // Set up Zod validation compilers (if not already set by host)
