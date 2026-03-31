@@ -25,3 +25,20 @@ await build({
 });
 
 console.log(`Built ${pkg.name} → dist/index.js`);
+
+// Build panel microfrontend bundle if the package has one
+import { existsSync } from 'node:fs';
+const panelEntry = resolve(packageDir, 'src/panel.ts');
+if (existsSync(panelEntry)) {
+  await build({
+    entryPoints: [panelEntry],
+    outfile: resolve(packageDir, 'dist/panel.js'),
+    bundle: true,
+    platform: 'browser',
+    target: 'es2022',
+    format: 'iife',
+    minify: true,
+    sourcemap: false,
+  });
+  console.log(`Built ${pkg.name} → dist/panel.js`);
+}

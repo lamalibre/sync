@@ -1,0 +1,19 @@
+{
+  "name": "sync",
+  "displayName": "Sync",
+  "version": "0.1.0",
+  "description": "Bidirectional file synchronization between agents",
+  "capabilities": ["sync:connect"],
+  "packages": {
+    "server": "@lamalibre/sync-server",
+    "agent": "@lamalibre/sync-agent"
+  },
+  "panel": {
+    "pages": [
+      { "path": "/connections", "title": "Connections", "icon": "folder" },
+      { "path": "/settings", "title": "Settings", "icon": "settings" }
+    ]
+  },
+  "modes": ["server", "agent", "local"],
+  "config": {}
+}

@@ -1,6 +1,6 @@
 {
   "name": "@lamalibre/sync-server",
-  "version": "0.1.2",
+  "version": "0.1.9",
   "description": "Sync server — Fastify REST API for file synchronization and cloud archive management",
   "type": "module",
   "license": "PolyForm-Noncommercial-1.0.0",
@@ -31,7 +31,8 @@
   },
   "exports": {
     ".": {
-      "import": "./dist/index.js"
+      "import": "./dist/index.js",
+      "default": "./dist/index.js"
     },
     "./portlama-plugin.json": "./portlama-plugin.json",
     "./panel.js": "./dist/panel.js"
