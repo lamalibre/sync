@@ -49,6 +49,8 @@ jobs:
           cp CHANGELOG.md packages/sync-agent/CHANGELOG.md
           cp LICENSE.md packages/create-sync/LICENSE.md
           cp CHANGELOG.md packages/create-sync/CHANGELOG.md
+          cp LICENSE.md packages/install-sync-desktop/LICENSE.md
+          cp CHANGELOG.md packages/install-sync-desktop/CHANGELOG.md
 
       - name: Publish sync-agent
         working-directory: packages/sync-agent
@@ -58,6 +60,12 @@ jobs:
 
       - name: Publish create-sync
         working-directory: packages/create-sync
+        run: pnpm publish --access public --no-git-checks
+        env:
+          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
+
+      - name: Publish install-sync-desktop
+        working-directory: packages/install-sync-desktop
         run: pnpm publish --access public --no-git-checks
         env:
           NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}

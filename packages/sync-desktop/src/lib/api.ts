@@ -27,15 +27,45 @@ import type {
 
 const STORAGE_KEY_URL = 'sync-server-url';
 const STORAGE_KEY_API_KEY = 'sync-api-key';
+const STORAGE_KEY_SOURCE = 'sync-server-source';
 
 const DEFAULT_SERVER_URL = 'http://localhost:9393';
+
+const PORTLAMA_BASE_URL = 'http://127.0.0.1:9293/sync';
+const STANDALONE_BASE_URL = 'http://localhost:9393';
+
+const DETECTION_CANDIDATES = [
+  { label: 'portlama' as const, baseUrl: PORTLAMA_BASE_URL },
+  { label: 'standalone' as const, baseUrl: STANDALONE_BASE_URL },
+];
+
+export type ServerSource = 'manual' | 'auto-detected' | 'default';
+
+export interface DetectionResult {
+  found: boolean;
+  label: 'portlama' | 'standalone' | null;
+  baseUrl: string | null;
+}
 
 export function getServerUrl(): string {
   return localStorage.getItem(STORAGE_KEY_URL) ?? DEFAULT_SERVER_URL;
 }
 
-export function setServerUrl(url: string): void {
+export function setServerUrl(url: string, source: ServerSource = 'manual'): void {
   localStorage.setItem(STORAGE_KEY_URL, url);
+  localStorage.setItem(STORAGE_KEY_SOURCE, source);
+}
+
+export function getServerSource(): ServerSource {
+  const stored = localStorage.getItem(STORAGE_KEY_SOURCE);
+  if (stored === 'manual' || stored === 'auto-detected') return stored;
+  return 'default';
+}
+
+export function clearServerConfig(): void {
+  localStorage.removeItem(STORAGE_KEY_URL);
+  localStorage.removeItem(STORAGE_KEY_API_KEY);
+  localStorage.removeItem(STORAGE_KEY_SOURCE);
 }
 
 export function getApiKey(): string {
@@ -44,6 +74,40 @@ export function getApiKey(): string {
 
 export function setApiKey(key: string): void {
   localStorage.setItem(STORAGE_KEY_API_KEY, key);
+}
+
+// ---------------------------------------------------------------------------
+// Server detection
+// ---------------------------------------------------------------------------
+
+const DETECTION_TIMEOUT_MS = 1500;
+
+export async function detectServer(): Promise<DetectionResult> {
+  for (const candidate of DETECTION_CANDIDATES) {
+    try {
+      const controller = new AbortController();
+      const timeout = setTimeout(() => controller.abort(), DETECTION_TIMEOUT_MS);
+      const res = await fetch(`${candidate.baseUrl}/api/sync/health`, {
+        signal: controller.signal,
+      });
+      clearTimeout(timeout);
+
+      if (res.ok) {
+        const body: unknown = await res.json();
+        if (
+          typeof body === 'object' &&
+          body !== null &&
+          'ok' in body &&
+          (body as Record<string, unknown>).ok === true
+        ) {
+          return { found: true, label: candidate.label, baseUrl: candidate.baseUrl };
+        }
+      }
+    } catch {
+      // timeout or network error — try next candidate
+    }
+  }
+  return { found: false, label: null, baseUrl: null };
 }
 
 // ---------------------------------------------------------------------------

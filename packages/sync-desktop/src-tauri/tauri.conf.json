@@ -23,7 +23,7 @@
     }
   },
   "plugins": {
-    "dialog": {}
+    "dialog": null
   },
   "bundle": {
     "active": true,

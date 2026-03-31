@@ -5,7 +5,12 @@
     getApiKey,
     setApiKey,
     getHealth,
+    getServerSource,
   } from "../lib/api.js";
+  import {
+    getDetectionResult,
+    redetect,
+  } from "../lib/detection.svelte.js";
   import {
     Settings as SettingsIcon,
     CheckCircle2,
@@ -13,14 +18,19 @@
     Loader2,
     Server,
     Key,
+    Radar,
   } from "lucide-svelte";
 
   let serverUrl = $state(getServerUrl());
   let apiKey = $state(getApiKey());
   let saved = $state(false);
   let testing = $state(false);
+  let redetecting = $state(false);
   let connectionStatus: "connected" | "error" | null = $state(null);
   let connectionMessage = $state("");
+
+  let serverSource = $derived(getServerSource());
+  let detectionResult = $derived(getDetectionResult());
 
   function handleSave(): void {
     setServerUrl(serverUrl.trim());
@@ -30,6 +40,18 @@
     setTimeout(() => {
       saved = false;
     }, 2000);
+  }
+
+  async function handleRedetect(): Promise<void> {
+    redetecting = true;
+    connectionStatus = null;
+    try {
+      const newUrl = await redetect();
+      serverUrl = newUrl;
+      apiKey = getApiKey();
+    } finally {
+      redetecting = false;
+    }
   }
 
   async function handleTestConnection(): Promise<void> {
@@ -93,6 +115,14 @@
             placeholder="http://localhost:9393"
             class="w-full rounded-md border border-border bg-surface px-3 py-2 text-sm text-text-primary placeholder-text-secondary/50 outline-none transition-colors focus:border-accent"
           />
+          {#if serverSource === 'auto-detected' && detectionResult?.label}
+            <p class="mt-1 flex items-center gap-1.5 text-xs text-accent">
+              <Radar class="h-3 w-3" />
+              Auto-detected via {detectionResult.label === 'portlama' ? 'Portlama plugin host' : 'standalone server'}
+            </p>
+          {:else if serverSource === 'manual'}
+            <p class="mt-1 text-xs text-text-secondary">Manually configured</p>
+          {/if}
         </div>
 
         <!-- API Key -->
@@ -135,6 +165,19 @@
             Testing...
           {:else}
             Test Connection
+          {/if}
+        </button>
+        <button
+          class="flex items-center gap-2 rounded-md border border-border bg-card-hover px-4 py-2 text-sm text-text-primary transition-colors hover:border-accent/40 hover:text-accent disabled:opacity-50"
+          onclick={handleRedetect}
+          disabled={redetecting}
+        >
+          {#if redetecting}
+            <Loader2 class="h-3.5 w-3.5 animate-spin" />
+            Detecting...
+          {:else}
+            <Radar class="h-3.5 w-3.5" />
+            Re-detect
           {/if}
         </button>
 

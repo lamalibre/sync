@@ -15,7 +15,12 @@
     Monitor,
     Eye,
     Trash2,
+    Loader2,
   } from "lucide-svelte";
+  import {
+    runDetection,
+    getDetectionPhase,
+  } from "./lib/detection.svelte.js";
 
   type View =
     | { name: "dashboard" }
@@ -27,6 +32,13 @@
     | { name: "settings" };
 
   let currentView: View = $state({ name: "dashboard" });
+
+  // Run server detection once on startup
+  let detectionPhase = $derived(getDetectionPhase());
+
+  $effect(() => {
+    runDetection();
+  });
 
   function navigate(view: View): void {
     currentView = view;
@@ -55,6 +67,14 @@
   });
 </script>
 
+{#if detectionPhase === 'detecting'}
+  <div class="flex h-full items-center justify-center bg-surface">
+    <div class="flex flex-col items-center gap-3">
+      <Loader2 class="h-6 w-6 animate-spin text-accent" />
+      <p class="text-sm text-text-secondary">Detecting sync server...</p>
+    </div>
+  </div>
+{:else}
 <div class="flex h-full">
   <!-- Sidebar -->
   <nav class="flex w-56 flex-col border-r border-border bg-card">
@@ -114,3 +134,4 @@
     {/if}
   </main>
 </div>
+{/if}

@@ -1,0 +1,37 @@
+{
+  "name": "@lamalibre/install-sync-desktop",
+  "version": "0.0.1",
+  "description": "Download and launch the Sync Desktop app",
+  "type": "module",
+  "license": "SEE LICENSE IN LICENSE.md",
+  "author": "Code Lama Software",
+  "bin": {
+    "install-sync-desktop": "bin/install-sync-desktop.js"
+  },
+  "files": [
+    "bin",
+    "src"
+  ],
+  "scripts": {
+    "lint": "eslint ."
+  },
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/lamalibre/sync.git",
+    "directory": "packages/install-sync-desktop"
+  },
+  "homepage": "https://github.com/lamalibre/sync#readme",
+  "bugs": {
+    "url": "https://github.com/lamalibre/sync/issues"
+  },
+  "keywords": [
+    "sync",
+    "desktop",
+    "tauri",
+    "file-sync",
+    "installer"
+  ],
+  "engines": {
+    "node": ">=20.0.0"
+  }
+}
