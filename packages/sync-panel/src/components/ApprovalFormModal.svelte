@@ -1,8 +1,6 @@
 <script lang="ts">
   import Modal from "./Modal.svelte";
-  import {
-    addApproval as addApprovalApi,
-  } from "../lib/api.js";
+  import { getSyncClient } from "../context/client.svelte.js";
   import type {
     Project,
     ApprovedPathEntry,
@@ -20,6 +18,8 @@
   }
 
   let { projects, existing, onsave, oncancel }: Props = $props();
+
+  const client = getSyncClient();
 
   const initial = untrack(() => existing);
   const isEdit = !!initial;
@@ -43,7 +43,7 @@
     loading = true;
     error = null;
     try {
-      await addApprovalApi({
+      await client.addApproval({
         projectId: selectedProjectId,
         localPath: localPath.trim(),
         projectName: selectedProject?.name ?? selectedProjectId,

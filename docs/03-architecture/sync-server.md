@@ -25,6 +25,17 @@ The server runs in two modes from the same codebase:
 - No separate port — routes mount at `/api/sync/`
 - Auth delegated to Portlama's mTLS middleware
 - State directory provided by Portlama
+- Decorates Fastify with `pluginContext` (panelUrl, ticketCerts) when ticket certs are configured
+- Serves `panel.js` microfrontend (built by sync-panel) for the Portlama admin panel
+
+### Plugin Manifest (`portlama-plugin.json`)
+
+The server includes a plugin manifest that Portlama reads at registration:
+- Declares the `sync:connect` capability
+- References server and agent packages
+- Defines 6 panel pages: Dashboard, Storage, Agents, Preview, Trash, Settings
+- Supports modes: server, agent, local
+- Version is automatically synced from `package.json` during build
 
 ## Route Map
 
@@ -79,7 +90,7 @@ The server runs in two modes from the same codebase:
 | --- | --- | --- | --- |
 | GET | `/api/sync/agent-config` | Agent (sync:read) | Get projects + storage config (credentials included) |
 | POST | `/api/sync/agent-report` | Agent (sync:write) + Agent Token | Report sync/archive/restore result |
-| POST | `/api/sync/agents` | Agent | Register new agent (returns one-time agent token) |
+| POST | `/api/sync/agents` | Agent | Register new agent (returns one-time agent token + optional delegated enrollment) |
 | POST | `/api/sync/agents/:agentId/heartbeat` | Agent Token | Send heartbeat with disk usage |
 | PATCH | `/api/sync/agents/:agentId/projects` | Admin + Agent Token | Update project assignments |
 | DELETE | `/api/sync/agents/:agentId` | Admin + Agent Token | Remove agent |
@@ -122,6 +133,14 @@ Agent mutation endpoints verify the `X-Agent-Token` header at the route level:
 
 The token is verified by hashing with SHA-256 and comparing against the stored hash using `timingSafeEqual`. If any registered agent has a stored token hash, the server requires a valid token from all agents on these endpoints.
 
+### `lib/delegated-enrollment.ts`
+
+Delegated Portlama enrollment for agents:
+- `announceDelegatedEnrollment()` — requests an enrollment token from Portlama's panel
+- POSTs to `/api/certs/agent/enroll-delegated` using mTLS dispatcher
+- Returns enrollment token, expiry, and panel URL
+- Best-effort: failures are logged but never block agent registration
+
 ### `lib/schemas.ts`
 
 Zod validation schemas for all API inputs:
@@ -157,7 +176,8 @@ Active operations are not persisted — they exist only while the server process
 | --- | --- |
 | `src/index.ts` | Standalone server entry (own Fastify, own auth) |
 | `src/server.ts` | Fastify app factory, error handling |
-| `src/lib/plugin.ts` | Portlama plugin entry (buildPlugin, fastify-plugin) |
+| `src/lib/plugin.ts` | Portlama plugin entry (buildPlugin, fastify-plugin, pluginContext) |
+| `src/lib/delegated-enrollment.ts` | Delegated Portlama enrollment for agents |
 | `src/lib/auth.ts` | Authentication hook (API key, SYNC_SKIP_AUTH) |
 | `src/lib/state.ts` | State file management (load/save JSON) |
 | `src/lib/crypto.ts` | AES-256-GCM encrypt/decrypt utilities |

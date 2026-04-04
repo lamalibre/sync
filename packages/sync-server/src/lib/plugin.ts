@@ -227,6 +227,10 @@ export function buildPlugin(options?: PluginOptions): FastifyPluginAsync {
       // (e.g., to request tickets when agents register).
       app.decorate('ticketManager', ticketManager);
 
+      // Expose panelUrl and ticketCerts so routes (e.g., delegated enrollment
+      // in agent registration) can create their own mTLS dispatchers.
+      app.decorate('pluginContext', { panelUrl, ticketCerts } as PluginContext);
+
       // Start asynchronously — don't block route registration
       void ticketManager.start().catch((err: unknown) => {
         app.log.error(
@@ -269,9 +273,21 @@ function readTicketCertsFromEnv(): TicketCertConfig | null {
 // Fastify type augmentation for ticket manager
 // ---------------------------------------------------------------------------
 
+// ---------------------------------------------------------------------------
+// Plugin context for route access
+// ---------------------------------------------------------------------------
+
+/** Portlama panel connection details, available in plugin mode when ticket certs are configured. */
+export interface PluginContext {
+  readonly panelUrl: string;
+  readonly ticketCerts: TicketCertConfig;
+}
+
 declare module 'fastify' {
   interface FastifyInstance {
     ticketManager?: TicketInstanceManager;
+    /** Portlama panel connection context (available in plugin mode with ticket certs). */
+    pluginContext?: PluginContext;
   }
 }
 

@@ -45,6 +45,16 @@ export interface AgentRegistrationResponse {
   };
   /** Per-agent authentication token — returned only on registration. */
   readonly agentToken?: string;
+  /**
+   * Delegated Portlama enrollment token.
+   * Present when the Sync server runs as a Portlama agent plugin and the
+   * panel issued a one-time enrollment token for this Sync agent.
+   */
+  readonly delegatedEnrollment?: {
+    readonly enrollmentToken: string;
+    readonly expiresAt: string;
+    readonly panelUrl: string;
+  };
 }
 
 /** Heartbeat payload sent to POST /api/sync/agents/:agentId/heartbeat. */
@@ -186,14 +196,37 @@ export class ServerClient {
       );
     }
 
-    const data = (await response.json()) as AgentRegistrationResponse;
+    const data: unknown = await response.json();
+    if (
+      !isObject(data) ||
+      data['ok'] !== true ||
+      !isObject(data['agent']) ||
+      typeof data['agent']['id'] !== 'string'
+    ) {
+      throw new Error('Invalid registration response from server');
+    }
+
+    // Validate delegatedEnrollment sub-fields if present
+    if (data['delegatedEnrollment'] !== undefined) {
+      const de = data['delegatedEnrollment'];
+      if (
+        !isObject(de) ||
+        typeof de['enrollmentToken'] !== 'string' ||
+        typeof de['panelUrl'] !== 'string'
+      ) {
+        // Strip invalid delegatedEnrollment rather than failing registration
+        delete (data as Record<string, unknown>)['delegatedEnrollment'];
+      }
+    }
+
+    const validated = data as AgentRegistrationResponse;
 
     this.logger.info(
-      { agentId: data.agent.id, status: data.agent.status },
+      { agentId: validated.agent.id, status: validated.agent.status },
       'Agent registered successfully',
     );
 
-    return data;
+    return validated;
   }
 
   /**
@@ -241,14 +274,18 @@ export class ServerClient {
   }
 }
 
+/** Runtime check that a value is a non-null object. */
+function isObject(value: unknown): value is Record<string, unknown> {
+  return typeof value === 'object' && value !== null && !Array.isArray(value);
+}
+
 /** Runtime type guard for AgentConfig. */
 function isAgentConfig(value: unknown): value is AgentConfig {
-  if (typeof value !== 'object' || value === null) return false;
-  const obj = value as Record<string, unknown>;
-  if (typeof obj['provider'] !== 'object' || obj['provider'] === null) return false;
-  if (!Array.isArray(obj['projects'])) return false;
+  if (!isObject(value)) return false;
+  if (!isObject(value['provider'])) return false;
+  if (!Array.isArray(value['projects'])) return false;
 
-  const provider = obj['provider'] as Record<string, unknown>;
+  const provider = value['provider'];
   if (typeof provider['type'] !== 'string') return false;
   if (typeof provider['bucket'] !== 'string') return false;
 

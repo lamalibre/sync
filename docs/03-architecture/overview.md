@@ -10,7 +10,7 @@ Sync has three main pieces:
 
 2. **The Sync Agent** — a daemon on the machine with files to sync that polls the server for config, executes rclone operations, watches for file changes, runs scheduled syncs, and reports results back.
 
-3. **The Admin Tools** — a CLI (and Portlama panel in plugin mode) that lets you manage projects, configure storage, trigger syncs, and view history.
+3. **The Admin Tools** — a CLI, a desktop app (Tauri), and a panel microfrontend (embedded in Portlama in plugin mode) that let you manage projects, configure storage, trigger syncs, and view history. The desktop app and panel share UI components via the `sync-panel` library.
 
 These three pieces interact through a polling loop: the agent checks the server every 30 seconds for config changes, executes operations, and reports results. The server is the single source of truth for project definitions and credentials.
 
@@ -21,9 +21,10 @@ These three pieces interact through a polling loop: the agent checks the server 
                         │  Server Machine (Mac / VPS / Portlama)           │
                         │                                                  │
   Admin                 │  ┌────────────────────────────────────────────┐  │
-  (CLI)                 │  │  Sync Server (Fastify, port 9393)          │  │
-       │                │  │                                            │  │
-       │  HTTP          │  │  REST API                                  │  │
+  (CLI / Desktop /      │  │  Sync Server (Fastify, port 9393)          │  │
+   Panel microfrontend) │  │                                            │  │
+       │                │  │  REST API                                  │  │
+       │  HTTP          │  │                                            │  │
        ├───────────────►│  │  ├─ /api/sync/projects    (CRUD + sync)   │  │
        │                │  │  ├─ /api/sync/storage     (provider cfg)  │  │
        │                │  │  ├─ /api/sync/agents      (registry)      │  │
@@ -92,6 +93,12 @@ These three pieces interact through a polling loop: the agent checks the server 
 │  └── uninstall                   │
 │                                  │
 │  ~/.sync-cli/config.json         │
+│                                  │
+│  sync-desktop (Tauri v2)         │
+│  └── Uses sync-panel components  │
+│                                  │
+│  Panel microfrontend (plugin mode)│
+│  └── panel.js → Portlama UI     │
 └──────────────────────────────────┘
 ```
 
@@ -99,9 +106,13 @@ These three pieces interact through a polling loop: the agent checks the server 
 
 | Component | Technology | Role |
 | --- | --- | --- |
-| **Sync Server** | Fastify 5, Zod | REST API, project management, storage config, agent registry, history |
-| **Sync Agent** | Node.js ESM, rclone, chokidar, node-cron, execa | Sync execution, file watching, scheduling, progress reporting |
+| **Sync Server** | Fastify 5, Zod | REST API, project management, storage config, agent registry, history, Portlama plugin manifest |
+| **Sync Agent** | Node.js ESM, rclone, chokidar, node-cron, execa | Sync execution, file watching, scheduling, progress reporting, Portlama enrollment |
 | **Sync CLI** | @clack/prompts, picocolors | Admin command-line interface |
+| **Sync Panel** | Svelte 5, Tailwind, Vite | Shared UI library and microfrontend — pages, modals, abstract client interface |
+| **Sync Desktop** | Tauri v2, Svelte 5 (via sync-panel) | Standalone desktop application |
+| **Sync E2E MCP** | MCP server | E2E test infrastructure (VM provisioning, test orchestration) |
+| **Install Sync Desktop** | Node.js CLI | Desktop app installer (`npx @lamalibre/install-sync-desktop`) |
 | **Create Sync** | esbuild bundled, zero deps | One-command installer (standalone + bundle) |
 | **Sync Shared** | TypeScript | Shared types, atomic writes, rclone config builder, ignore resolver, approved paths, pending sync, error sanitization |
 
@@ -147,6 +158,23 @@ sync/
 │   │                                trash-list, trash-restore, trash-purge,
 │   │                                agent-approve, preview, uninstall
 │   │
+│   ├── sync-panel/               ← Shared Svelte UI (desktop + microfrontend)
+│   │   └── src/
+│   │       ├── index.ts           ← Library exports (pages, components, types, client)
+│   │       ├── panel.ts           ← Microfrontend entry (IIFE, registers __portlamaPlugins.sync)
+│   │       ├── panel.css          ← Tailwind styles
+│   │       ├── App.svelte         ← Root app component (page router)
+│   │       ├── pages/             ← Dashboard, ProjectDetail, StorageSetup, Agents,
+│   │       │                         Preview, Trash, Settings
+│   │       ├── components/        ← Modal, ConfirmModal, ProjectFormModal, ApprovalFormModal
+│   │       ├── context/
+│   │       │   └── client.svelte.ts ← Svelte context for SyncClient dependency injection
+│   │       └── lib/
+│   │           ├── client.ts      ← Abstract SyncClient interface (32 methods)
+│   │           ├── fetch-client.ts ← HTTP fetch implementation (for microfrontend)
+│   │           ├── types.ts       ← UI domain types
+│   │           └── format.ts      ← formatRelativeTime, formatBytes utilities
+│   │
 │   ├── sync-shared/              ← Shared utilities
 │   │   └── src/
 │   │       ├── types.ts           ← Domain types (provider, direction, strategy, trigger, status)
@@ -159,6 +187,10 @@ sync/
 │   │       ├── approved-paths.ts  ← Agent path approval, access modes, confirm modes
 │   │       ├── pending-sync.ts    ← Sync preview/confirm state management
 │   │       └── sanitize-error.ts  ← Credential redaction from rclone errors
+│   │
+│   ├── sync-e2e-mcp/             ← E2E test MCP infrastructure
+│   │
+│   ├── install-sync-desktop/     ← Desktop app installer CLI
 │   │
 │   └── create-sync/              ← npx installer
 │       └── src/lib/

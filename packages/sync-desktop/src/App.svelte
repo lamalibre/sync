@@ -1,11 +1,9 @@
 <script lang="ts">
-  import Dashboard from "./views/Dashboard.svelte";
-  import ProjectDetail from "./views/ProjectDetail.svelte";
-  import StorageSetup from "./views/StorageSetup.svelte";
-  import Agents from "./views/Agents.svelte";
-  import Preview from "./views/Preview.svelte";
-  import Trash from "./views/Trash.svelte";
-  import Settings from "./views/Settings.svelte";
+  import {
+    SyncApp,
+    type SyncClient,
+  } from "@lamalibre/sync-panel";
+  import DesktopSettings from "./views/Settings.svelte";
   import {
     LayoutDashboard,
     HardDrive,
@@ -21,6 +19,7 @@
     runDetection,
     getDetectionPhase,
   } from "./lib/detection.svelte.js";
+  import { createDesktopSyncClient } from "./lib/desktop-client.js";
 
   type View =
     | { name: "dashboard" }
@@ -40,16 +39,15 @@
     runDetection();
   });
 
+  // Create the desktop SyncClient for the shared panel components
+  const client: SyncClient = createDesktopSyncClient();
+
   function navigate(view: View): void {
     currentView = view;
   }
 
   function navigateToDashboard(): void {
     currentView = { name: "dashboard" };
-  }
-
-  function navigateToProject(projectId: string): void {
-    currentView = { name: "project", projectId };
   }
 
   const navItems = [
@@ -64,6 +62,13 @@
   let activeNavName = $derived.by(() => {
     const viewName: View["name"] = currentView.name;
     return viewName === "project" ? "dashboard" : viewName;
+  });
+
+  // Map view names to sync-panel page IDs
+  let currentPageId = $derived.by(() => {
+    const name = currentView.name;
+    if (name === "project") return "dashboard";
+    return name;
   });
 </script>
 
@@ -99,38 +104,18 @@
     </div>
 
     <div class="border-t border-border px-4 py-3">
-      <p class="text-xs text-text-secondary">v0.1.0</p>
+      <p class="text-xs text-text-secondary">v{__APP_VERSION__}</p>
     </div>
   </nav>
 
   <!-- Main content -->
   <main class="flex-1 overflow-y-auto bg-surface">
-    {#if currentView.name === "dashboard"}
-      <Dashboard onSelectProject={navigateToProject} />
-    {:else if currentView.name === "project"}
-      <div class="p-6">
-        <button
-          class="mb-4 flex items-center gap-1 text-sm text-text-secondary transition-colors hover:text-accent"
-          onclick={navigateToDashboard}
-        >
-          <ArrowLeft class="h-4 w-4" />
-          Back to Dashboard
-        </button>
-        <ProjectDetail
-          projectId={currentView.projectId}
-          onNavigateBack={navigateToDashboard}
-        />
-      </div>
-    {:else if currentView.name === "storage"}
-      <StorageSetup />
-    {:else if currentView.name === "agents"}
-      <Agents />
-    {:else if currentView.name === "preview"}
-      <Preview />
-    {:else if currentView.name === "trash"}
-      <Trash />
-    {:else if currentView.name === "settings"}
-      <Settings />
+    {#if currentView.name === "settings"}
+      <!-- Desktop-specific settings page (connection config) -->
+      <DesktopSettings />
+    {:else}
+      <!-- Shared sync-panel pages -->
+      <SyncApp {client} currentPage={currentPageId} />
     {/if}
   </main>
 </div>

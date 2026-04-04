@@ -114,6 +114,14 @@ export interface AgentSettings {
   readonly agentName?: string;
   /** Per-agent authentication token returned on registration. */
   readonly agentToken?: string;
+  /** Path to the Portlama client certificate (PEM). */
+  readonly portlamaCert?: string;
+  /** Path to the Portlama private key (PEM). */
+  readonly portlamaKey?: string;
+  /** Path to the Portlama CA certificate (PEM). */
+  readonly portlamaCaCert?: string;
+  /** The plugin-agent label assigned during Portlama enrollment. */
+  readonly portlamaLabel?: string;
 }
 
 /** Progress information parsed from rclone stderr. */

@@ -1,6 +1,6 @@
 {
   "name": "@lamalibre/sync-agent",
-  "version": "0.1.2",
+  "version": "0.1.3",
   "description": "Sync agent daemon — file watching, rclone sync execution, and server communication",
   "type": "module",
   "license": "PolyForm-Noncommercial-1.0.0",

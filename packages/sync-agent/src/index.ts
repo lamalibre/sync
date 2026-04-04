@@ -103,6 +103,12 @@ export {
   type PluginModeSettings,
 } from './lib/plugin-mode.js';
 export {
+  enrollWithPortlama,
+  getPortlamaCertPaths,
+  type PortlamaEnrollmentResult,
+  type PortlamaCertPaths,
+} from './lib/portlama-enrollment.js';
+export {
   TicketClient,
   TicketSessionManager,
   createTicketDispatcher,

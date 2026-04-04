@@ -1,5 +1,5 @@
 /**
- * Shared formatting utilities for desktop views.
+ * Shared formatting utilities for sync UI views.
  */
 
 export function formatRelativeTime(iso: string | null): string {

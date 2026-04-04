@@ -1,10 +1,5 @@
 <script lang="ts">
-  import {
-    getStatus,
-    getProjects,
-    getProjects_includeDeleted,
-    restoreProject,
-  } from "../lib/api.js";
+  import { getSyncClient } from "../context/client.svelte.js";
   import type { GlobalStatus, Project } from "../lib/types.js";
   import { formatRelativeTime, formatBytes } from "../lib/format.js";
   import ProjectFormModal from "../components/ProjectFormModal.svelte";
@@ -27,6 +22,8 @@
 
   let { onSelectProject }: Props = $props();
 
+  const client = getSyncClient();
+
   let status: GlobalStatus | null = $state(null);
   let projects: Project[] = $state([]);
   let deletedProjects: Project[] = $state([]);
@@ -41,9 +38,9 @@
     error = null;
     try {
       const [statusRes, projectsRes, allProjectsRes] = await Promise.all([
-        getStatus(),
-        getProjects(),
-        getProjects_includeDeleted(),
+        client.getStatus(),
+        client.getProjects(),
+        client.getProjectsIncludeDeleted(),
       ]);
       status = statusRes;
       projects = projectsRes.projects;
@@ -61,7 +58,7 @@
   async function handleRestoreProject(projectId: string): Promise<void> {
     restoreInProgress = projectId;
     try {
-      await restoreProject(projectId);
+      await client.restoreProject(projectId);
       await refresh();
     } catch (err: unknown) {
       error =

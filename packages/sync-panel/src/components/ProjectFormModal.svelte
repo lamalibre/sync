@@ -1,6 +1,6 @@
 <script lang="ts">
   import Modal from "./Modal.svelte";
-  import { createProject, updateProject } from "../lib/api.js";
+  import { getSyncClient } from "../context/client.svelte.js";
   import type {
     Project,
     ProjectCreateInput,
@@ -19,6 +19,8 @@
   }
 
   let { project, onsave, oncancel }: Props = $props();
+
+  const client = getSyncClient();
 
   // Capture initial values outside the reactive graph — this modal is
   // mounted fresh each time, so we only need the initial prop value.
@@ -69,7 +71,7 @@
         if (encrypted && encryptionPassword) {
           input.encryptionPassword = encryptionPassword;
         }
-        const res = await updateProject(project.id, input);
+        const res = await client.updateProject(project.id, input);
         onsave(res.project);
       } else {
         const input: ProjectCreateInput = {
@@ -86,7 +88,7 @@
         if (encrypted && encryptionPassword) {
           input.encryptionPassword = encryptionPassword;
         }
-        const res = await createProject(input);
+        const res = await client.createProject(input);
         onsave(res.project);
       }
     } catch (err: unknown) {

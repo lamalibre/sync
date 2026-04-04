@@ -76,6 +76,7 @@ import { readStub } from './lib/stub.js';
 import { getBisyncState, updateBisyncState } from './lib/bisync-state.js';
 import { FileWatcher } from './lib/file-watcher.js';
 import { Scheduler } from './lib/scheduler.js';
+import { enrollWithPortlama, getPortlamaCertPaths } from './lib/portlama-enrollment.js';
 import type {
   AgentConfig,
   AgentSettings,
@@ -1158,22 +1159,56 @@ export class Agent {
 
       // Persist agent ID and agent token if they changed
       const newToken = response.agentToken;
-      if (
+      const registrationChanged =
         this.settings.agentId !== this.agentId ||
-        (newToken && this.settings.agentToken !== newToken)
-      ) {
-        const updatedSettings = {
-          ...this.settings,
-          agentId: this.agentId,
-          ...(newToken ? { agentToken: newToken } : {}),
-        };
+        (newToken !== undefined && this.settings.agentToken !== newToken);
+
+      let updatedSettings = {
+        ...this.settings,
+        agentId: this.agentId,
+        ...(newToken ? { agentToken: newToken } : {}),
+      };
+
+      // Persist basic registration data first — before attempting enrollment
+      // so that agent ID and token are never lost if enrollment throws.
+      if (registrationChanged) {
         await writeAgentSettings(this.agentDir, updatedSettings);
         this.settings = updatedSettings;
-        // Update the server client's token so subsequent requests include it
         if (newToken && this.serverClient) {
           this.serverClient.setAgentToken(newToken);
         }
         this.logger.info({ agentId: this.agentId }, 'Agent ID and token persisted to settings');
+      }
+
+      // Handle delegated Portlama enrollment (best-effort, separate try/catch)
+      if (response.delegatedEnrollment && !this.settings.portlamaCert) {
+        try {
+          const { enrollmentToken, panelUrl } = response.delegatedEnrollment;
+          const enrollResult = await enrollWithPortlama(
+            panelUrl,
+            enrollmentToken,
+            this.agentDir,
+            this.logger,
+          );
+
+          if (enrollResult) {
+            const certPaths = getPortlamaCertPaths(this.agentDir);
+            updatedSettings = {
+              ...updatedSettings,
+              portlamaCert: certPaths.certPath,
+              portlamaKey: certPaths.keyPath,
+              portlamaCaCert: certPaths.caCertPath,
+              portlamaLabel: enrollResult.label,
+            };
+            await writeAgentSettings(this.agentDir, updatedSettings);
+            this.settings = updatedSettings;
+          }
+        } catch (enrollErr: unknown) {
+          this.logger.warn(
+            { err: enrollErr instanceof Error ? enrollErr.message : String(enrollErr) },
+            'Delegated Portlama enrollment failed (non-fatal)',
+          );
+        }
       }
     } catch (error: unknown) {
       this.logger.warn(

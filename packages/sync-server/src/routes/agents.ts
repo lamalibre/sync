@@ -23,6 +23,8 @@ import {
   NotFoundError,
   ConflictError,
 } from '../lib/state.js';
+import { createTicketDispatcher } from '@lamalibre/portlama-tickets';
+import { announceDelegatedEnrollment } from '../lib/delegated-enrollment.js';
 
 /**
  * Strip the agentTokenHash from an agent record before sending to clients.
@@ -113,6 +115,47 @@ export async function agentRegistryRoutes(app: FastifyInstance): Promise<void> {
         });
       }
 
+      // In plugin mode, announce a delegated enrollment to the Portlama panel
+      // so the Sync agent gets a Portlama identity for ticket authorization.
+      // Best-effort — the normal response is returned even if this fails.
+      let delegatedEnrollment: {
+        enrollmentToken: string;
+        expiresAt: string;
+        panelUrl: string;
+      } | undefined;
+
+      const pluginContext = app.pluginContext;
+
+      if (pluginContext) {
+        let dispatcher: import('undici').Agent | undefined;
+        try {
+          dispatcher = await createTicketDispatcher({ certs: pluginContext.ticketCerts });
+          const result = await announceDelegatedEnrollment(
+            pluginContext.panelUrl,
+            dispatcher,
+            agent.name,
+            'sync:connect',
+            request.log,
+          );
+          if (result) {
+            delegatedEnrollment = {
+              enrollmentToken: result.enrollmentToken,
+              expiresAt: result.expiresAt,
+              panelUrl: pluginContext.panelUrl,
+            };
+          }
+        } catch (err: unknown) {
+          request.log.warn(
+            { err: err instanceof Error ? err.message : String(err), agentName: agent.name },
+            'Failed to set up delegated enrollment announcement',
+          );
+        } finally {
+          if (dispatcher) {
+            void dispatcher.close().catch(() => { /* ignore */ });
+          }
+        }
+      }
+
       // Return the token only on registration — agent must save it.
       // The agentTokenHash is stripped from the response (never expose hashes).
       return reply.status(201).send({
@@ -122,6 +165,7 @@ export async function agentRegistryRoutes(app: FastifyInstance): Promise<void> {
           status: getAgentStatus(agent),
         },
         agentToken,
+        ...(delegatedEnrollment ? { delegatedEnrollment } : {}),
       });
     },
   );

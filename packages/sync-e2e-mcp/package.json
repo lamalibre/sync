@@ -1,6 +1,6 @@
 {
   "name": "@lamalibre/sync-e2e-mcp",
-  "version": "0.1.0",
+  "version": "0.1.1",
   "description": "MCP server for Sync E2E test infrastructure — server lifecycle, test execution, dependency resolution",
   "type": "module",
   "private": false,

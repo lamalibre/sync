@@ -7,15 +7,18 @@ File synchronization and cloud archive tool. rclone-based. Bidirectional sync, a
 ```
 sync/
 ├── packages/
-│   ├── sync-server/        @lamalibre/sync-server — Fastify REST API
-│   ├── sync-agent/         @lamalibre/sync-agent — Agent daemon
-│   ├── sync-cli/           @lamalibre/sync-cli — CLI tool
-│   ├── sync-shared/        @lamalibre/sync-shared — Shared utilities
-│   ├── sync-desktop/       @lamalibre/sync-desktop — Svelte desktop UI
-│   └── create-sync/        @lamalibre/create-sync — npx installer
+│   ├── sync-server/              @lamalibre/sync-server — Fastify REST API
+│   ├── sync-agent/               @lamalibre/sync-agent — Agent daemon
+│   ├── sync-cli/                 @lamalibre/sync-cli — CLI tool
+│   ├── sync-shared/              @lamalibre/sync-shared — Shared utilities
+│   ├── sync-panel/               @lamalibre/sync-panel — Shared Svelte UI (desktop + microfrontend)
+│   ├── sync-desktop/             @lamalibre/sync-desktop — Tauri v2 desktop app (uses sync-panel)
+│   ├── sync-e2e-mcp/             @lamalibre/sync-e2e-mcp — E2E test MCP infrastructure
+│   ├── install-sync-desktop/     @lamalibre/install-sync-desktop — Desktop app installer
+│   └── create-sync/              @lamalibre/create-sync — npx installer
 ├── tests/
-│   └── e2e/               E2E tests
-└── docs/                  Architecture, API, Storage docs
+│   └── e2e/                     E2E tests
+└── docs/                        Architecture, API, Storage docs
 ```
 
 ## Development

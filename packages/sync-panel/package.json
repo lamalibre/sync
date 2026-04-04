@@ -1,0 +1,43 @@
+{
+  "name": "@lamalibre/sync-panel",
+  "version": "0.1.2",
+  "description": "Shared Svelte UI for Sync — used by desktop app and panel.js microfrontend",
+  "type": "module",
+  "license": "PolyForm-Noncommercial-1.0.0",
+  "author": "Code Lama Software",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/lamalibre/sync.git",
+    "directory": "packages/sync-panel"
+  },
+  "publishConfig": {
+    "access": "public"
+  },
+  "exports": {
+    ".": "./src/index.ts",
+    "./panel.js": "./dist/panel.js"
+  },
+  "files": [
+    "src",
+    "dist"
+  ],
+  "scripts": {
+    "build": "vite build && node scripts/inline-css.mjs",
+    "lint": "svelte-check --tsconfig ./tsconfig.json"
+  },
+  "dependencies": {
+    "lucide-svelte": "^0.460.0"
+  },
+  "devDependencies": {
+    "@sveltejs/vite-plugin-svelte": "^5.0.0",
+    "@tailwindcss/vite": "^4.0.0",
+    "svelte": "^5.0.0",
+    "svelte-check": "^4.0.0",
+    "tailwindcss": "^4.0.0",
+    "typescript": "^5.7.0",
+    "vite": "^6.0.0"
+  },
+  "peerDependencies": {
+    "svelte": "^5.0.0"
+  }
+}

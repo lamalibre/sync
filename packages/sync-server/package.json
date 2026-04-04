@@ -1,6 +1,6 @@
 {
   "name": "@lamalibre/sync-server",
-  "version": "0.1.9",
+  "version": "0.1.14",
   "description": "Sync server — Fastify REST API for file synchronization and cloud archive management",
   "type": "module",
   "license": "PolyForm-Noncommercial-1.0.0",
@@ -49,6 +49,7 @@
   },
   "dependencies": {
     "@fastify/cors": "^11.0.0",
+    "@lamalibre/sync-panel": "workspace:*",
     "@lamalibre/sync-shared": "workspace:*",
     "execa": "^9.5.0",
     "@lamalibre/portlama-tickets": "^0.1.0",

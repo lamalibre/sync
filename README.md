@@ -45,15 +45,18 @@ sync restore
 ```
 sync/
 ├── packages/
-│   ├── sync-server/        @lamalibre/sync-server — Fastify REST API
-│   ├── sync-agent/         @lamalibre/sync-agent — Agent daemon
-│   ├── sync-cli/           @lamalibre/sync-cli — CLI tool
-│   ├── sync-shared/        @lamalibre/sync-shared — Shared utilities
-│   ├── sync-desktop/       @lamalibre/sync-desktop — Tauri v2 + Svelte 5 desktop UI
-│   └── create-sync/        @lamalibre/create-sync — npx installer
+│   ├── sync-server/              @lamalibre/sync-server — Fastify REST API
+│   ├── sync-agent/               @lamalibre/sync-agent — Agent daemon
+│   ├── sync-cli/                 @lamalibre/sync-cli — CLI tool
+│   ├── sync-shared/              @lamalibre/sync-shared — Shared utilities
+│   ├── sync-panel/               @lamalibre/sync-panel — Shared Svelte UI (desktop + microfrontend)
+│   ├── sync-desktop/             @lamalibre/sync-desktop — Tauri v2 desktop app (uses sync-panel)
+│   ├── sync-e2e-mcp/             @lamalibre/sync-e2e-mcp — E2E test MCP infrastructure
+│   ├── install-sync-desktop/     @lamalibre/install-sync-desktop — Desktop app installer
+│   └── create-sync/              @lamalibre/create-sync — npx installer
 ├── tests/
-│   └── e2e/               Two-VM E2E tests
-└── docs/                  Full documentation
+│   └── e2e/                     Two-VM E2E tests
+└── docs/                        Full documentation
 ```
 
 ## Tech Stack

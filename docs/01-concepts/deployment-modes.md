@@ -21,7 +21,8 @@ Think of Sync as a filing clerk who keeps your local folders and cloud storage i
 | **Install command** | `npx @lamalibre/create-sync` | Plugin registered in Portlama config |
 | **Port** | 9393 (configurable) | Portlama's port (typically 9292 via nginx) |
 | **Network requirement** | Agents need direct access to server | Agents connect through Portlama's relay |
-| **Management UI** | CLI | Portlama panel + CLI |
+| **Management UI** | CLI + Desktop app | Portlama panel (sync-panel microfrontend) + CLI + Desktop app |
+| **Agent enrollment** | API key enrollment | API key + delegated Portlama mTLS certificate enrollment |
 | **State directory** | `~/.sync/` | Portlama's state directory |
 | **Storage credentials** | Encrypted in `sync-config.json` | Encrypted in Portlama's state |
 
@@ -98,6 +99,10 @@ Admin (Portlama panel)                  Agent Machine
 └────────────────────────────────────────────────────────────┘
 ```
 
+### Panel Microfrontend
+
+In plugin mode, the server serves a `panel.js` microfrontend (built by `@lamalibre/sync-panel`) that Portlama loads into its admin UI. The panel registers itself at `window.__portlamaPlugins.sync` and provides 6 pages: Dashboard, Storage, Agents, Preview, Trash, and Settings. The panel uses an HTTP fetch-based client to communicate with the Sync server through Portlama's routes.
+
 ### Authentication
 
 Portlama's mTLS middleware handles authentication before Sync routes execute. The plugin reads `request.certRole` and agent capabilities directly — no API keys needed.
@@ -119,6 +124,10 @@ In plugin mode, agents receive a config bundle from Portlama containing:
 - Project definitions
 
 The agent decrypts the bundle during enrollment and caches the config locally.
+
+### Delegated Enrollment
+
+When a new agent registers with a plugin-mode server, the server requests a delegated enrollment token from Portlama. The registration response includes this token alongside the standard agent ID and token. The agent then uses the enrollment token to obtain mTLS certificates from Portlama, enabling secure ticket-based authorization for inter-agent communication. Enrollment is best-effort — if it fails, the agent continues operating without Portlama certificates.
 
 ## Choosing a Mode
 

@@ -1,14 +1,5 @@
 <script lang="ts">
-  import {
-    getProject,
-    getProjectStatus,
-    getHistory,
-    triggerSync,
-    triggerArchive,
-    triggerRestore,
-    deleteProject,
-    restoreProject,
-  } from "../lib/api.js";
+  import { getSyncClient } from "../context/client.svelte.js";
   import type {
     Project,
     ProjectStatusResponse,
@@ -37,6 +28,8 @@
 
   let { projectId, onNavigateBack }: Props = $props();
 
+  const client = getSyncClient();
+
   let project: Project | null = $state(null);
   let projectStatus: ProjectStatusResponse | null = $state(null);
   let history: SyncOperation[] = $state([]);
@@ -53,9 +46,9 @@
     error = null;
     try {
       const [projectRes, statusRes, historyRes] = await Promise.all([
-        getProject(projectId),
-        getProjectStatus(projectId),
-        getHistory(projectId, 20),
+        client.getProject(projectId),
+        client.getProjectStatus(projectId),
+        client.getHistory(projectId, 20),
       ]);
       project = projectRes.project;
       projectStatus = statusRes;
@@ -71,7 +64,7 @@
     actionInProgress = true;
     actionError = null;
     try {
-      await triggerSync(projectId);
+      await client.triggerSync(projectId);
       await refresh();
     } catch (err: unknown) {
       actionError = err instanceof Error ? err.message : "Sync failed";
@@ -84,7 +77,7 @@
     actionInProgress = true;
     actionError = null;
     try {
-      await triggerArchive(projectId);
+      await client.triggerArchive(projectId);
       await refresh();
     } catch (err: unknown) {
       actionError = err instanceof Error ? err.message : "Archive failed";
@@ -97,7 +90,7 @@
     actionInProgress = true;
     actionError = null;
     try {
-      await triggerRestore(projectId);
+      await client.triggerRestore(projectId);
       await refresh();
     } catch (err: unknown) {
       actionError = err instanceof Error ? err.message : "Restore failed";
@@ -110,7 +103,7 @@
     actionInProgress = true;
     actionError = null;
     try {
-      await deleteProject(projectId, false);
+      await client.deleteProject(projectId, false);
       onNavigateBack();
     } catch (err: unknown) {
       actionError = err instanceof Error ? err.message : "Delete failed";
@@ -123,7 +116,7 @@
     actionInProgress = true;
     actionError = null;
     try {
-      await deleteProject(projectId, true);
+      await client.deleteProject(projectId, true);
       onNavigateBack();
     } catch (err: unknown) {
       actionError =
@@ -137,7 +130,7 @@
     actionInProgress = true;
     actionError = null;
     try {
-      const res = await restoreProject(projectId);
+      const res = await client.restoreProject(projectId);
       project = res.project;
       showDeleteConfirm = false;
       await refresh();

@@ -1,6 +1,6 @@
 {
   "name": "@lamalibre/install-sync-desktop",
-  "version": "0.0.1",
+  "version": "0.0.2",
   "description": "Download and launch the Sync Desktop app",
   "type": "module",
   "license": "SEE LICENSE IN LICENSE.md",

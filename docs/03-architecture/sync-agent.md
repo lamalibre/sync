@@ -16,6 +16,8 @@ The agent's own settings (`agent-settings.json`) are also protected: the API key
 1. Start
    └── Load agent-settings.json (server URL, API key, agent ID)
    └── Register with server: POST /api/sync/agents
+   └── Persist agent ID and token immediately
+   └── If delegated enrollment returned: enroll with Portlama (best-effort)
    └── Load cached config (if server unreachable, use cache)
 
 2. Poll loop (every 30 seconds)
@@ -240,6 +242,18 @@ On each poll, the agent regenerates `rclone.conf`:
 
 The config is regenerated idempotently — the output is the same if nothing changed.
 
+## Portlama Enrollment
+
+When the server runs as a Portlama plugin, agent registration returns a `delegatedEnrollment` payload containing an enrollment token, expiry, and panel URL. The agent uses this to obtain mTLS certificates for secure communication with the Portlama ticket system:
+
+1. Generate RSA 4096-bit key pair
+2. Create PKCS#10 CSR via openssl
+3. POST enrollment request to Portlama's `/api/enroll` endpoint
+4. Write certificate files atomically to `<agentDir>/portlama-cert/` (key mode 0600, cert mode 0644)
+5. Store certificate paths and label in `agent-settings.json`
+
+Enrollment is best-effort: failures are logged as warnings but never prevent the agent from operating. Agent ID and token are persisted before enrollment is attempted, so they are never lost if enrollment fails.
+
 ## Source Files
 
 | File | Role |
@@ -259,7 +273,8 @@ The config is regenerated idempotently — the output is the same if nothing cha
 | `src/lib/server-client.ts` | HTTP client for server API |
 | `src/lib/config.ts` | Agent settings management (encrypted API key and agent token at rest) |
 | `src/lib/plugin-mode.ts` | Portlama plugin mode support |
-| `src/lib/types.ts` | Agent-specific type definitions |
+| `src/lib/portlama-enrollment.ts` | Portlama mTLS certificate enrollment (RSA keygen, CSR, cert write) |
+| `src/lib/types.ts` | Agent-specific type definitions (includes Portlama cert paths) |
 
 ### Shared (sync-shared)
 
